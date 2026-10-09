@@ -1,7 +1,9 @@
 /* The build supplies the complete asset list and a content-derived version. */
 const VERSION=__VERSION__,FILES=__FILES__;
 const PREFIX='olm-lab:'+self.registration.scope+':',CACHE=PREFIX+VERSION;
-self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(FILES))));
+self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(
+  FILES.map(file=>new Request(new URL(file,self.registration.scope),{cache:'reload'}))
+))));
 self.addEventListener('activate',event=>event.waitUntil((async()=>{
   for(const key of await caches.keys())if(key.startsWith(PREFIX)&&key!==CACHE)await caches.delete(key);
   await self.clients.claim();

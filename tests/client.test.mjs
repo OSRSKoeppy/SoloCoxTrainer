@@ -27,9 +27,9 @@ async function workerHarness(){
  const absolute=request=>new URL(typeof request==='string'?request:request.url,scope).href.split('?')[0];
  const cacheAPI={keys:async()=>[...stores.keys()],delete:async key=>{deleted.push(key);return stores.delete(key);},open:async key=>{
    if(!stores.has(key))stores.set(key,new Map());const store=stores.get(key);
-   return {addAll:async files=>{for(const f of files){await fs.access(new URL('../public/'+f.slice(2),import.meta.url));store.set(absolute(f),{file:f});}},match:async request=>store.get(absolute(request))};
+   return {addAll:async files=>{for(const request of files){assert.equal(request.cache,'reload','new builds must bypass stale HTTP-cached HTML and bundles');const f='./'+request.url.slice(scope.length);await fs.access(new URL('../public/'+f.slice(2),import.meta.url));store.set(absolute(request),{file:f});}},match:async request=>store.get(absolute(request))};
  }};
- vm.runInNewContext(source,{URL,caches:cacheAPI,fetch:async()=>{if(!online)throw Error('offline');return {network:true};},self:{registration:{scope},addEventListener:(type,fn)=>handlers[type]=fn,clients:{claim:async()=>claimed++},skipWaiting:()=>activated++}});
+ vm.runInNewContext(source,{URL,Request,caches:cacheAPI,fetch:async()=>{if(!online)throw Error('offline');return {network:true};},self:{registration:{scope},addEventListener:(type,fn)=>handlers[type]=fn,clients:{claim:async()=>claimed++},skipWaiting:()=>activated++}});
  return {handlers,stores,deleted,scope,offline:()=>online=false,claimed:()=>claimed,activated:()=>activated,dispatch:async(type)=>{let pending;handlers[type]({waitUntil:p=>pending=p});await pending;},request:async(path,mode='cors')=>{let pending;handlers.fetch({request:{url:scope+path,method:'GET',mode},respondWith:p=>pending=p});return pending;}};
 }
 test('installed app precaches every game asset and starts offline below a GitHub project path',async()=>{
