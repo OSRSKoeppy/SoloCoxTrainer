@@ -51,6 +51,19 @@ Floor meshes are batched and repeated room objects are instanced. Ground picking
 
 ## Controls
 
+The default **Game view** uses a quieter arena, claw/head health bars, and a
+special-attack cue. **Show coaching** restores tick counters, cycle information,
+and the tile legend. The actual true tile, destination and practice markers
+remain independently configurable. The camera starts closer and edges use
+antialiasing; inventory and prayer controls remain on the right on desktop.
+
+In **Practice settings → Practise a special**, select one of 14 mechanics and
+start an isolated drill. It uses unlimited HP and suspends normal boss attacks.
+**Retry special** repeats it; Reset or a change of focus restores your previous
+encounter options. Prayer spheres still require the correct protection prayer.
+For flame walls, select the water spell, click a burning floor tile, then walk
+through that single gap. Other flame segments remain active.
+
 Click a claw to keep attacking it. Click the floor to move and cancel attacking. Click inventory items individually to equip them or drink supplies. Switching gear keeps the current attack cooldown. Running covers up to two tiles per game tick, walking one. Ground pathing respects the floor and blocked diagonal corners.
 
 F4 opens inventory, F5 equipment, F6 prayers, F7 spells. Right-click for an action menu. Middle-drag or arrow keys rotate the camera; scroll zooms. On phones, tap to act, drag with two fingers to rotate, and pinch to zoom. The phase selector restarts any of the three hand phases or the ranged head. Practice settings include unlimited hitpoints and the timing overlay.
@@ -73,6 +86,22 @@ Show head turns illustrates tracking alone. Select a solo focus and use Watch me
 
 Tests cover the seven/eight-tile four-tick running examples, two-tile attack dragging, collision, minimap coordinate round trips, redirection, intermediate acid tiles, clock catch-up, and skipped attack/special slots. They are regression checks against the stated rules, not a complete recorded-fight replay.
 
+## Special effects and rendering
+
+Specials retain their render objects across ticks instead of rebuilding their
+meshes and materials every 600 ms. Lightning interpolates along its lane using
+the same pause/slow-motion clock as the player. Cached flame, crystal, lightning,
+burn and explosion models are accompanied by growing crystal shadows, impact
+effects, pulsing portals, healing-pool rings, acid bubbles, larger prayer
+spheres, a healing-hand indicator, and player burn/trail effects. Flame models
+are enlarged for readability. Portal/pool rings and several cues are procedural
+approximations, not newly extracted OSRS graphics.
+
+Paused poses are reused, and player vertex interpolation avoids allocating an
+array for every vertex on every frame. Tests cover persistent effect lifetime,
+interpolation, warning/impact timing, all special drills, and targeted water
+escape. Desktop and phone-sized browser checks exercise the actual controls.
+
 ## Player animation and solo-method revision
 
 The player now uses one assembled cache rig. The camera follows the animated player with smoothing, as in the client; turn this off in settings for a room overview. On narrow screens practice buttons sit above chat and tile outlines thicken to remain visible. Weapons, armour and the body share joint pivots, instead of animating each equipment model independently. The lance uses its own attack (8288); the previous build mistakenly used a rapier attack (8145). Weapon idle/walk/run clips and the cache's movement masks are included. Actions start on their attack tick, can blend with locomotion, play once for their actual duration, and keep their timeline when equipment changes. Scythe swings show three hit splats. Supplies and water spells also animate.
@@ -89,7 +118,7 @@ Full encounters now include 600-HP hands, early-phase clenching while the mage h
 
 This is a much more complete practice simulation, **not a byte-for-byte recreation of the live server**. The cache verifies asset geometry, animation sequences and frame durations; it does not contain the server's combat code. Forty-one regression tests cover the movement, rig poses, attack cycles, method routes, splash/late-click recovery, and encounter mechanics. The rig exporter independently compared all vertices in 24 assembled poses with the cache decoder; checked-in reference samples preserve that check without needing the cache at startup.
 
-The method tests reproduce rules and routes transcribed from the guide, not captured live-game network traces. Their passing establishes internal consistency with those examples. The centre/sided vision boundaries and NPC processing order have not been exhaustively verified at every tile and edge case. The no-damage scan fallback uses a 50/50 choice when a recent attack splashed; its exact live-game probability is unverified. Player accuracy/max hits, gear bonuses, protection reduction, orb/power selection frequencies, several hazard durations/damage values and transition duration remain explicit training approximations. Flame-wall water targeting is simplified. Rendering still differs in lighting, face alpha transforms, particles and the inventory rasteriser. These limits matter when using the trainer to predict live-game damage or rare recovery cases.
+The method tests reproduce rules and routes transcribed from the guide, not captured live-game network traces. Their passing establishes internal consistency with those examples. The centre/sided vision boundaries and NPC processing order have not been exhaustively verified at every tile and edge case. The no-damage scan fallback uses a 50/50 choice when a recent attack splashed; its exact live-game probability is unverified. Player accuracy/max hits, gear bonuses, protection reduction, orb/power selection frequencies, several hazard durations/damage values and transition duration remain explicit training approximations. Water targeting now opens an individual wall segment; rune consumption, spell-level checks and cast-range validation remain simplified. Rendering still differs in lighting, face alpha transforms, particles and the inventory rasteriser. These limits matter when using the trainer to predict live-game damage or rare recovery cases.
 
 Additional video references used in this revision:
 - [Mage route and same-tick drag, 2:19:29](https://www.youtube.com/watch?v=klhBxOH8reQ&t=8369s).

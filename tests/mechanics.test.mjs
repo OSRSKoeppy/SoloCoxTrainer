@@ -4,6 +4,13 @@ import fs from 'node:fs';
 import {Encounter} from '../src/engine.mjs';
 const scene=JSON.parse(fs.readFileSync(new URL('../public/assets/scene.json',import.meta.url))),items=JSON.parse(fs.readFileSync(new URL('../public/assets/manifest.json',import.meta.url))).items;
 const make=()=>new Encounter(scene,items,{mechanics:'basic'});
+test('water targets one flame tile and opens only that escape gap',()=>{
+ const g=make();g.position={x:32,y:44};g.addHazard('flame',32,44,0,8);
+ assert.equal(g.water({x:32,y:44}),false);assert.equal(g.water({x:32,y:43}),true);assert.equal(g.water({x:32,y:43}),false);
+ assert.equal(g.hazards.length,1);assert.deepEqual(g.hazards[0].gaps,['32,43']);
+ g.move({x:32,y:42});g.applyMovement();assert.deepEqual(g.position,{x:32,y:42});
+ g.position={x:33,y:44};g.move({x:33,y:42});g.applyMovement();assert.deepEqual(g.position,{x:33,y:44});
+});
 test('one scythe swing resolves three hits without counting three attacks',()=>{
  const g=new Encounter(scene,items,{method:'scythe',accuracy:'always',mechanics:'basic'});g.position={x:28,y:47};g.attack('melee');g.next();const hits=g.effects.filter(e=>e.type==='hand-hit');assert.equal(g.attackCount,1);assert.equal(g.cooldown,5);assert.equal(hits.length,3);assert.deepEqual(hits.map(h=>h.damage),[hits[0].damage,Math.floor(hits[0].damage/2),Math.floor(hits[0].damage/4)]);
 });

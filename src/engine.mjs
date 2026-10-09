@@ -73,11 +73,16 @@ export class Encounter {
     this.doses[index]--;if(!this.doses[index]){this.inventory[index]=null;delete this.doses[index];}
   }
   pray(name,offensive=false){if(!offensive&&this.tick<this.prayerLockedUntil){this.log('Game','Lightning has temporarily disabled protection prayers.');return;}if(offensive)this.offensive=this.offensive===name?null:name;else this.protection=this.protection===name?null:name;}
-  water(){if(this.inventory.includes(555)&&this.inventory.includes(560)){this.hazards=this.hazards.filter(h=>h.type!=='flame');this.animation=711;this.attackAt=this.tick;this.log('Spell','You extinguish the flame wall.');}}
+  water(tile){
+    if(!tile||!this.inventory.includes(555)||!this.inventory.includes(560))return false;
+    const wall=this.hazards.find(h=>h.type==='flame'&&this.tick>=h.due&&this.tick<h.until&&Math.abs(tile.y-h.y)===1&&this.walkable.has(key(tile))&&!(h.gaps||[]).includes(key(tile)));
+    if(!wall)return false;
+    (wall.gaps??=[]).push(key(tile));this.animation=711;this.attackAt=this.tick;this.log('Spell','You extinguish a segment of the flame wall. Walk through the gap.');return true;
+  }
   hitPlayer(amount,style){if(this.protection===style)amount=Math.floor(amount*.4);if(!this.options.invincible&&this.options.method!=='demo')this.hp=Math.max(0,this.hp-amount);this.effects.push({type:'player-hit',damage:amount,tick:this.tick});}
   applyMovement(){this.previous={...this.position};const steps=this.run&&!this.walkOverride?2:1;this.motionPace=steps;
     this.motionPath=[{...this.position}];
-    for(let n=0;n<steps&&this.path.length&&this.tick>=this.boundUntil;n++){const next=this.path[0];if(this.hazards.some(h=>h.type==='flame'&&this.tick>=h.due&&this.tick<h.until&&Math.abs(next.y-h.y)===1))break;this.path.shift();this.facing=Math.atan2(next.x-this.position.x,-(next.y-this.position.y));this.position=next;this.motionPath.push({...next});}
+    for(let n=0;n<steps&&this.path.length&&this.tick>=this.boundUntil;n++){const next=this.path[0];if(this.hazards.some(h=>h.type==='flame'&&this.tick>=h.due&&this.tick<h.until&&Math.abs(next.y-h.y)===1&&!(h.gaps||[]).includes(key(next))))break;this.path.shift();this.facing=Math.atan2(next.x-this.position.x,-(next.y-this.position.y));this.position=next;this.motionPath.push({...next});}
     this.animation=distance(this.previous,this.position)?steps===2?824:819:this.tick-this.attackAt<2?this.animation:808;
   }
   inRange(p=this.position){if(!this.target||!this.weapon)return false;const r=this.targetRect(this.target);return this.weapon.style==='melee'?meleeReach(p,r):rectangleDistance(p,r)<=7;}
@@ -177,17 +182,17 @@ export class Encounter {
       if(visible(this.position.y-1)&&visible(this.position.y+1)&&this.walkable.has(key({x:this.position.x,y:this.position.y-1}))&&this.walkable.has(key({x:this.position.x,y:this.position.y+1})))this.addHazard('flame',this.position.x,this.position.y,1,8);
       else this.log('Olm','The flame walls cannot form at this tile.');
     }
-    this.effects.push({type:'olm-power',facing:this.headFacing,tick:this.tick});this.lastBossAction+=' · '+type;this.log('Olm',type+' attack.');
+    this.effects.push({type:'olm-power',special:type,facing:this.headFacing,tick:this.tick});this.lastBossAction+=' · '+type;this.log('Olm',type+' attack.');
   }
   special(type){
     this.trace.push({type:'special',tick:this.tick,special:type});this.effects.push({type:'hand-special',special:type,tick:this.tick});
     if(type==='crystal')this.addHazard('burst',this.position.x,this.position.y,3,1);
-    if(type==='lightning')for(let x=29;x<=36;x+=2){const north=this.random()<.5;this.hazards.push({type:'lightning',x,y:north?35:51,startY:north?35:51,direction:north?1:-1,due:this.tick+2,until:this.tick+19});}
+    if(type==='lightning')for(let x=29;x<=36;x+=2){const north=this.random()<.5;this.hazards.push({type:'lightning',x,y:north?35:51,startY:north?35:51,direction:north?1:-1,created:this.tick,due:this.tick+2,until:this.tick+19});}
     if(type==='portal'){let p=this.randomTile();while(distance(p,this.position)>10)p=this.randomTile();this.addHazard('portal',p.x,p.y,8,1);}
     if(type==='heal'){this.healUntil=this.tick+8;this.log('Olm','The left hand begins to heal.');}
     this.log('Olm',type+' special.');
   }
-  addHazard(type,x,y,delay,duration){this.hazards.push({type,x,y,due:this.tick+delay,until:this.tick+delay+duration});}
+  addHazard(type,x,y,delay,duration){this.hazards.push({type,x,y,created:this.tick,due:this.tick+delay,until:this.tick+delay+duration});}
   hazardsTick(){
     for(const hit of this.incoming.filter(h=>h.due<=this.tick))this.hitPlayer(hit.sphere?(this.protection===hit.sphere?0:Math.floor(this.hp/2)):hit.damage,'none');
     this.incoming=this.incoming.filter(h=>h.due>this.tick);
@@ -197,6 +202,7 @@ export class Encounter {
     const pools=this.hazards.filter(h=>h.type==='pool'&&this.tick===h.due);
     if(pools.length&&!pools.some(h=>distance(this.position,h)===0)){const damage=10+Math.floor(this.random()*11);this.hitPlayer(damage,'none');this.handHP.head=Math.min(800,this.handHP.head+damage*5);this.log('Olm','Missed healing pools: Olm absorbs health.');}
     for(const h of this.hazards){if(this.tick<h.due||this.tick>=h.until||h.type==='pool')continue;
+      if(this.tick===h.due&&['crystal','bomb'].includes(h.type))this.effects.push({type:'hazard-impact',x:h.x,y:h.y,tick:this.tick});
       if(h.type==='lightning')h.y=h.startY+(this.tick-h.due)*h.direction;
       const d=distance(this.position,h);
       if(h.type==='acid'&&d===0)this.hitPlayer(4,'none');
@@ -206,7 +212,7 @@ export class Encounter {
       if(h.type==='lightning'&&d===0){this.hitPlayer(15,'none');this.boundUntil=this.tick+2;this.prayerLockedUntil=this.tick+4;this.protection=null;}
       if(h.type==='portal'){this.hitPlayer(Math.min(50,d*5),'none');this.position={x:h.x,y:h.y};this.previous={...this.position};this.motionPath=[{...this.position}];this.path=[];this.destination=null;this.log('Olm',d?'The portal pulls you across the room.':'The teleport attack has no effect.');}
       if(h.type==='flame'&&this.position.y===h.y&&this.tick===h.until-1)this.hitPlayer(50,'none');
-      if(h.type==='flame'&&Math.abs(this.position.y-h.y)===1)this.hitPlayer(5,'none');
+      if(h.type==='flame'&&Math.abs(this.position.y-h.y)===1&&!(h.gaps||[]).includes(key(this.position)))this.hitPlayer(5,'none');
     }
     this.hazards=this.hazards.filter(h=>h.until>this.tick);
   }
