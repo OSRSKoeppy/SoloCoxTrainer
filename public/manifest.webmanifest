@@ -1,0 +1,15 @@
+{
+  "id": "./",
+  "name": "Olm Lab — Solo CoX Trainer",
+  "short_name": "Olm Lab",
+  "description": "Practise solo Great Olm, gear switches and special attacks.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#171611",
+  "theme_color": "#29251d",
+  "icons": [
+    {"src":"icons/olm-192.png","sizes":"192x192","type":"image/png","purpose":"any"},
+    {"src":"icons/olm-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
+}

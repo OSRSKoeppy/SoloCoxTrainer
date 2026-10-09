@@ -7,3 +7,5 @@ Olm-3D-Offline.html
 !.env.example
 .DS_Store
 
+public/sw.js
+public/icons/

@@ -1,3 +1,5 @@
+import {initInterface,PRAYERS,EQUIPMENT} from './interface.mjs';
+import {initAppInstall} from './pwa.mjs';
 import {Encounter,METHODS,TICK_MS} from './engine.mjs';
 import {View,loadAssets,asset} from './render.mjs';
 import {mapPoint,mapTile} from './tiles.mjs';
@@ -6,6 +8,7 @@ import {TickClock} from './clock.mjs';
 import {SPECIAL_PRACTICE,triggerSpecial,specialCue} from './special-practice.mjs';
 (async()=>{
 const $=id=>document.getElementById(id),clock=new TickClock();let game,view,icons,manifest,playing=false,lastTime=performance.now(),tab='inventory',uiVersion='',speed=1,coaching=false,rehearsal=null,endingTime=0,specialPractice=null,selectedSpell=false;
+initInterface();initAppInstall();
 for(const [key,info]of Object.entries(SPECIAL_PRACTICE))$('special-select').add(new Option(info.name,key));
 $('special-select').onchange=()=>$('special-description').textContent=SPECIAL_PRACTICE[$('special-select').value].hint;$('special-select').onchange();
 function stopSpecialPractice(){if(!specialPractice)return;Object.assign(game.options,specialPractice.options);specialPractice=null;$('mechanics').value=game.options.mechanics;$('invincible').checked=game.options.invincible;}
@@ -18,8 +21,8 @@ $('practice-special').onclick=()=>{
 };
 $('retry-special').onclick=()=>$('practice-special').onclick();
 for(const [id,m]of Object.entries(METHODS))$('method').add(new Option(m.name,id));
-function setTab(name){tab=name;document.querySelectorAll('.tab-panel').forEach(p=>p.hidden=p.id!==name);document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('selected',b.dataset.tab===name));uiVersion='';updateUI();}
-document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+function setTab(name,toggle=false){const closed=toggle&&tab===name&&!document.body.classList.contains('panel-closed');document.body.classList.toggle('panel-closed',closed);tab=name;document.querySelectorAll('.tab-panel').forEach(p=>p.hidden=p.id!==name);document.querySelectorAll('[data-tab]').forEach(b=>{b.classList.toggle('selected',b.dataset.tab===name&&!closed);b.setAttribute('aria-expanded',String(b.dataset.tab===name&&!closed));});uiVersion='';updateUI();}
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>setTab(b.dataset.tab,true));
 $('play').onclick=()=>{playing=!playing;lastTime=performance.now();updateUI();};
 $('reset').onclick=()=>restart();
 function stopRehearsal(){if(rehearsal){Object.assign(game.options,rehearsal);rehearsal=null;$('watch-drill').textContent='Watch method';}}
@@ -34,7 +37,7 @@ $('method').onchange=()=>{stopSpecialPractice();if(game.options.method==='demo'&
 function setSpeed(value){speed=+value;$('speed').value=$('settings-speed').value=String(speed);}
 $('speed').onchange=()=>setSpeed($('speed').value);$('settings-speed').onchange=()=>setSpeed($('settings-speed').value);
 $('demo').onclick=()=>{stopSpecialPractice();$('method').value='demo';game.options.method='demo';setSpeed(.5);restart();playing=true;lastTime=performance.now();updateUI();};
-$('help').onclick=()=>$('help-dialog').showModal();$('settings').onclick=()=>$('settings-dialog').showModal();document.querySelectorAll('dialog .close').forEach(b=>b.onclick=()=>b.closest('dialog').close());
+$('help').onclick=()=>$('help-dialog').showModal();$('settings').onclick=$('settings-gear').onclick=()=>{$('trainer-menu').open=false;$('settings-dialog').showModal();};document.querySelectorAll('dialog .close').forEach(b=>b.onclick=()=>b.closest('dialog').close());
 $('invincible').onchange=()=>game.options.invincible=$('invincible').checked;
 $('follow-player').onchange=()=>{view.followPlayer=$('follow-player').checked;view.focusInitialized=false;};
 $('coaching').onchange=()=>{coaching=$('coaching').checked;document.body.classList.toggle('client-view',!coaching);$('layout').textContent=coaching?'Game view':'Show coaching';};
@@ -43,7 +46,7 @@ for(const name of ['trueTile','destination','grid','markers','path'])$('tiles-'+
 $('step').onclick=()=>{playing=false;clock.remainder=0;clock.advance(TICK_MS,1,time=>tickGame(time));updateUI();};
 document.addEventListener('visibilitychange',()=>{lastTime=performance.now();if(document.hidden&&playing){playing=false;updateUI();}});
 $('run').onclick=()=>{game.run=!game.run;updateUI();};$('camera-reset').onclick=()=>view.resetCamera();
-$('water').onclick=()=>{selectedSpell=!selectedSpell;$('water').classList.toggle('active',selectedSpell);game.feedback=selectedSpell?'Cast water: click a burning flame-wall tile.':'';updateUI();};$('chat-toggle').onclick=()=>{$('messages').hidden=!$('messages').hidden;$('chat').style.height=$('messages').hidden?'24px':'';};
+$('water').onclick=()=>{selectedSpell=!selectedSpell;$('water').classList.toggle('active',selectedSpell);game.feedback=selectedSpell?'Cast water: click a burning flame-wall tile.':'';updateUI();};
 function restart(){selectedSpell=false;$('water').classList.remove('active');endingTime=0;stopSpecialPractice();stopRehearsal();game.reset();view.reset();clock.reset();lastTime=performance.now();uiVersion='';$('phase').value=game.phase;$('method').value=game.options.method;updateUI();}
 function itemButton(id,index,equipment=false){const button=document.createElement('button');button.className='item'+(equipment?' equipment-item':'');if(!id){button.title='Empty slot';return button;}
   const item=manifest.items[id];button.title=item.name;button.setAttribute('aria-label',equipment?`Remove ${item.name}`:`${item.slot==='supply'?'Drink':'Equip'} ${item.name}`);const img=new Image();img.src=icons[id];img.alt=item.name;button.append(img);
@@ -52,15 +55,29 @@ function itemButton(id,index,equipment=false){const button=document.createElemen
   const activate=button.onclick;if(activate){button.onpointerdown=e=>{if(e.pointerType==='mouse'&&e.button===0){e.preventDefault();activate();}};button.onclick=e=>{if(e.detail===0||e.pointerType!=='mouse')activate();};}
   return button;
 }
-const prayers=[['Thick Skin',115],['Burst of Strength',116],['Clarity of Thought',117],['Rock Skin',118],['Superhuman Strength',119],['Improved Reflexes',120],['Rapid Restore',121],['Rapid Heal',122],['Protect Item',123],['Steel Skin',124],['Ultimate Strength',125],['Incredible Reflexes',126],['Protect from Magic',127,'mage'],['Protect from Missiles',128,'range'],['Protect from Melee',129,'melee'],['Retribution',131],['Redemption',130],['Smite',132],['Sharp Eye',133],['Mystic Will',134]];
-async function makePrayers(){for(const [name,id,protection]of prayers){const b=document.createElement('button');b.className='prayer-item';b.title=name;b.setAttribute('aria-label',name);const img=new Image();img.src=await asset(manifest.sprites[id].file);img.alt=name;b.append(img);if(protection){b.dataset.protection=protection;b.onclick=()=>{game.pray(protection);updateUI();};}else b.disabled=true;$('prayers').append(b);}
-  for(const [name,style]of [['Piety','melee'],['Augury','mage'],['Rigour','range']]){const b=document.createElement('button');b.textContent=name;b.className='prayer-item';b.title=name;b.dataset.offensive=style;b.onclick=()=>{game.pray(style,true);updateUI();};$('prayers').append(b);}const p=document.createElement('p');p.className='prayer-tip';p.textContent='Protection prayers and the three offensive prayers are available.';$('prayers').append(p);}
+const spriteURLs={};
+async function makePrayers(){
+  for(const [name,id,protection,offensive]of PRAYERS){
+    const b=document.createElement('button');b.className='prayer-item';b.title=name;b.setAttribute('aria-label',name);
+    const img=new Image();img.src=await asset(manifest.sprites[id].file);img.alt='';b.append(img);
+    if(protection||offensive){const key=protection?'protection':'offensive';b.dataset[key]=protection||offensive;b.onclick=()=>{game.pray(protection||offensive,!!offensive);updateUI();};}
+    else{b.disabled=true;b.title=name+' · not simulated in this trainer';}
+    $('prayers').append(b);
+    if(protection){const quick=b.cloneNode(true);quick.onclick=b.onclick;quick.setAttribute('aria-label','Quick '+name);$('quick-prayers').append(quick);}
+  }
+  for(const [,id]of EQUIPMENT)spriteURLs[id]=await asset(manifest.sprites[id].file);
+}
+function equipmentButtons(){return EQUIPMENT.map(([slot,sprite,column,row])=>{
+  const id=game.equipment[slot],b=itemButton(id,slot,true);b.style.gridColumn=column;b.style.gridRow=row;
+  if(!id){const img=new Image();img.src=spriteURLs[sprite];img.alt='';b.append(img);b.title='Empty '+slot+' slot';b.setAttribute('aria-label',b.title);b.disabled=true;}
+  return b;
+});}
 function updateUI(){if(!game)return;$('retry-special').hidden=!specialPractice;$('play').textContent=playing?'Pause':'Start';$('paused').hidden=playing&&game.active;$('paused').textContent=game.won?'Great Olm defeated':!game.active?'You have died · Reset to practise':game.tick?'Paused':'Click Start to practise';
   const targets=game.phase===4?['head']:['mage','melee'];$('boss-bars').replaceChildren(...targets.map(target=>{const bar=document.createElement('div');bar.className='boss-bar';const max=target==='head'?800:game.options.handHealth;const fill=document.createElement('i');fill.style.width=(100*game.handHP[target]/max)+'%';const label=document.createElement('span');label.textContent=`${target==='head'?'Great Olm':target==='mage'?'Right claw':'Left claw'} · ${game.handHP[target]} / ${max}`;bar.append(fill,label);return bar;}));
   const cue=specialCue(game);$('special-cue').hidden=!cue;if(cue){$('special-cue').dataset.tone=cue.tone;$('special-cue').querySelector('strong').textContent=cue.title;$('special-cue').querySelector('span').textContent=cue.detail;}
-  $('hp').textContent=game.hp;$('pp').textContent=Math.ceil(game.prayerPoints);$('run').textContent=game.run?'⚡ Run':'⚡ Walk';$('phase-label').textContent=game.transition?'Phase transition':`Phase ${game.phase} · ${game.phase===4?'Head':game.power}`;$('timing').textContent=`Tick ${game.tick} · Next hit ${game.cooldown?`in ${game.cooldown}t`:'ready'}\nHits ${game.attackCount} · Olm autos ${game.olmAttacks} · Turns ${game.turns}`;$('timing').style.whiteSpace='pre-line';$('coach').textContent=METHODS[game.options.method]?.text||'';$('feedback').textContent=game.feedback;$('drill-controls').hidden=!DRILLS[game.options.method];$('splash').hidden=game.options.method!=='3:0';$('weapon-name').textContent=game.weapon?.name||'Unarmed';$('stats').textContent=`Attack ${game.stats.attack} · Strength ${game.stats.strength} · Magic ${game.stats.magic}`;
-  const version=JSON.stringify([game.inventory,game.equipment,game.doses,tab]);if(version!==uiVersion){uiVersion=version;if(tab==='inventory')$('inventory').replaceChildren(...game.inventory.map((id,i)=>itemButton(id,i)));if(tab==='equipment')$('equipment').replaceChildren(...Object.entries(game.equipment).map(([slot,id])=>itemButton(id,slot,true)));}
-  document.querySelectorAll('[data-protection]').forEach(b=>b.classList.toggle('active',b.dataset.protection===game.protection));document.querySelectorAll('[data-offensive]').forEach(b=>b.classList.toggle('active',b.dataset.offensive===game.offensive));
+  $('hp').textContent=game.hp;$('pp').textContent=Math.ceil(game.prayerPoints);$('run-label').textContent=game.run?'Run':'Walk';$('run').classList.toggle('active',game.run);$('run').setAttribute('aria-pressed',String(game.run));$('phase-label').textContent=game.transition?'Phase transition':`Phase ${game.phase} · ${game.phase===4?'Head':game.power}`;$('timing').textContent=`Tick ${game.tick} · Next hit ${game.cooldown?`in ${game.cooldown}t`:'ready'}\nHits ${game.attackCount} · Olm autos ${game.olmAttacks} · Turns ${game.turns}`;$('timing').style.whiteSpace='pre-line';$('coach').textContent=METHODS[game.options.method]?.text||'';$('feedback').textContent=game.feedback;$('drill-controls').hidden=!DRILLS[game.options.method];$('splash').hidden=game.options.method!=='3:0';$('weapon-name').textContent=game.weapon?.name||'Unarmed';$('stats').textContent=`Attack ${game.stats.attack} · Strength ${game.stats.strength} · Magic ${game.stats.magic}`;
+  const version=JSON.stringify([game.inventory,game.equipment,game.doses,tab]);if(version!==uiVersion){uiVersion=version;if(tab==='inventory')$('inventory').replaceChildren(...game.inventory.map((id,i)=>itemButton(id,i)));if(tab==='equipment')$('equipment').replaceChildren(...equipmentButtons());}
+  for(const key of ['protection','offensive'])document.querySelectorAll('[data-'+key+']').forEach(b=>{const active=b.dataset[key]===game[key];b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));});
   $('messages').replaceChildren(...game.events.slice(0,5).reverse().map(e=>{const p=document.createElement('p');p.className=`event-${e.type}`;p.textContent=`[${e.tick}] ${e.text}`;return p;}));drawMap();
 }
 function drawMap(){const ctx=$('map').getContext('2d');ctx.clearRect(0,0,176,176);ctx.fillStyle='#080807';ctx.fillRect(0,0,176,176);for(const t of game.scene.tiles){const p=mapPoint(t);ctx.fillStyle=game.walkable.has(`${t.x},${t.y}`)?'#514840':'#1d1d1a';ctx.fillRect(p.x-4,p.y-4,8,8);}if(game.destination&&game.path.length){const p=mapPoint(game.destination);ctx.strokeStyle='#fff';ctx.strokeRect(p.x-3,p.y-3,6,6);}const player=mapPoint(game.position);ctx.fillStyle='#30e9ef';ctx.fillRect(player.x-2,player.y-2,4,4);ctx.fillStyle='#e33';for(const target of ['mage','melee','head']){const r=game.targetRect(target),p=mapPoint({x:r.x+2,y:r.y+2});ctx.fillRect(p.x-2,p.y-2,4,4);}}

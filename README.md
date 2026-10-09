@@ -13,6 +13,41 @@ Save the linked file and open it in a modern desktop browser. Phones can use
 the hosted link or a local server on the same Wi-Fi; opening local HTML varies
 by mobile operating system.
 
+## Install as an app
+
+Open the hosted link in your external browser (rather than Discord's embedded
+browser), then open the wrench → **Interface & app**. Choose **Install Olm Lab**
+when the browser offers it. On iPhone/iPad, use Safari → Share → Add to Home
+Screen. On Android, use Chrome → Install app / Add to Home screen. Chrome and
+Edge on desktop also offer installation from the address bar.
+
+Wait for **Ready to play offline** in Settings before disconnecting. The app
+caches the entire room, player animations, models, icons and code. Offline play
+depends on the browser retaining its storage; clearing site data removes the
+download. Reopen online to check for updates; **Update & reload** applies a
+downloaded update when you are ready, without interrupting a fight automatically.
+Installation needs HTTPS or localhost; plain HTTP LAN hosting remains playable
+but does not provide the install/offline-cache features. The standalone HTML is
+still available without a service worker.
+
+## Desktop and mobile interface
+
+Desktop uses a RuneLite-style resizable viewport, floating minimap, four-by-seven
+inventory, equipment paper doll, and a five-column prayer book with cache sprites.
+Mobile uses right-side touch tabs, a folding panel, left-side protection-prayer
+shortcuts and safe-area spacing. Landscape offers the most arena space; portrait
+is supported. Tap the selected tab again to fold the panel away.
+
+The **OLM LAB** menu at the top expands to show focus, phase, speed, reset,
+demonstrations, coaching and full screen. The wrench opens all other settings,
+including special practice and tiles. **Layout** defaults to automatic device
+detection; its desktop/mobile override is saved locally. Resizing a desktop
+window alone does not switch it into the phone interface.
+
+Only protection prayers and Piety/Rigour/Augury are simulated. Other prayer
+icons are dimmed and disabled. This is a game-inspired interface, not a full
+RuneLite client or the official OSRS Mobile application.
+
 ## Build and publish
 
 Use Node.js 22 or newer: `npm ci`, `npm run build`, then `npm test`.
