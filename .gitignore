@@ -1,0 +1,9 @@
+node_modules/
+dist/
+public/app.js
+Olm-3D-Offline.html
+*.log
+.env*
+!.env.example
+.DS_Store
+
