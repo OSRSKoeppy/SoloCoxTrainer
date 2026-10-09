@@ -14,6 +14,10 @@ self.addEventListener('fetch',event=>{
   if(event.request.method!=='GET'||!url.href.startsWith(self.registration.scope))return;
   event.respondWith((async()=>{
     const cache=await caches.open(CACHE);
+    if(url.pathname===new URL('update.html',self.registration.scope).pathname){
+      try{return await fetch(new Request(url.href,{cache:'reload'}));}
+      catch{const fallback=await cache.match(event.request,{ignoreSearch:true});if(fallback)return fallback;throw new Error('Connect to update the trainer.');}
+    }
     // A build is served atomically: HTML and models always belong to one version.
     const cached=await cache.match(event.request,{ignoreSearch:true});
     if(cached)return cached;

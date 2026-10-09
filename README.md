@@ -26,6 +26,16 @@ caches the entire room, player animations, models, icons and code. Offline play
 depends on the browser retaining its storage; clearing site data removes the
 download. Reopen online to check for updates; **Update & reload** applies a
 downloaded update when you are ready, without interrupting a fight automatically.
+New sessions apply ready updates before the first tick. An update arriving during
+a fight shows a visible **Update available** button. Settings includes an explicit
+**Check for updates** action and a build identifier.
+
+If a browser still shows an old interface, open
+[Refresh saved trainer](https://osrskoeppy.github.io/SoloCoxTrainer/update.html)
+in that same browser, wait for **Olm Lab updated**, then choose **Open updated
+trainer**. This works for ordinary browser tabs as well as saved apps; visiting
+the site alone enables its offline cache. The refresh page updates this trainer
+without clearing browser preferences or unrelated sites.
 Installation needs HTTPS or localhost; plain HTTP LAN hosting remains playable
 but does not provide the install/offline-cache features. The standalone HTML is
 still available without a service worker.

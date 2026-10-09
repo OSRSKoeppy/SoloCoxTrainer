@@ -18,7 +18,11 @@ for(const size of [192,512]){
   }
   await fs.writeFile(`public/icons/olm-${size}.png`,PNG.sync.write(png));
 }
-await build({entryPoints:['src/app.mjs'],bundle:true,format:'iife',target:'es2022',outfile:'public/app.js',minify:true,legalComments:'eof'});
+const sourceHash=createHash('sha256');
+for(const name of (await fs.readdir('src')).sort())sourceHash.update(await fs.readFile(path.join('src',name)));
+sourceHash.update(await fs.readFile('public/index.html'));sourceHash.update(await fs.readFile('public/style.css'));
+const release=sourceHash.digest('hex').slice(0,8);
+await build({entryPoints:['src/app.mjs'],bundle:true,format:'iife',target:'es2022',outfile:'public/app.js',minify:true,legalComments:'eof',define:{__OLM_BUILD__:JSON.stringify(release)}});
 const assets={};async function collect(dir){for(const entry of await fs.readdir(dir,{withFileTypes:true})){const filename=path.join(dir,entry.name);if(entry.isDirectory())await collect(filename);else{const key=path.relative('public/assets',filename).replaceAll('\\','/'),bytes=await fs.readFile(filename);assets[key]=key.endsWith('.json')?bytes.toString('utf8'):key.endsWith('.png')?'data:image/png;base64,'+bytes.toString('base64'):bytes.toString('base64');}}}
 await collect('public/assets');const css=await fs.readFile('public/style.css','utf8'),js=await fs.readFile('public/app.js','utf8');let html=await fs.readFile('public/index.html','utf8');
 html=html.replace('<link rel="stylesheet" href="style.css">',()=>`<style>${css}</style>`).replace('<script src="app.js" defer></script>',()=>`<script>window.OLM_ASSETS=${JSON.stringify(assets).replaceAll('<','\\u003c')};</script><script>${js.replaceAll('</script','<\\/script')}</script>`);

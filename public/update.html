@@ -1,0 +1,31 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#29251d"><title>Update Olm Lab</title>
+<style>html{color-scheme:dark;background:#171611;color:#e4dbc7;font:16px/1.6 system-ui}body{max-width:460px;margin:12vh auto;padding:24px}h1{color:#eac986;font:30px Georgia}button,a{display:inline-block;padding:10px 18px;border:1px solid #8a7755;background:#443a29;color:#ffe3a3;font:inherit;border-radius:3px;cursor:pointer}small{color:#b9ad96}#open[hidden],#retry[hidden]{display:none}</style></head>
+<body><h1>Updating Olm Lab</h1><p id="status" role="status">Checking for the latest trainer…</p><p><small>This refreshes the trainer saved by this browser. Keep this page open while it downloads.</small></p><button id="retry" hidden>Try again</button> <a id="open" href="./" hidden>Open updated trainer</a>
+<script>
+const status=document.getElementById('status'),retry=document.getElementById('retry'),open=document.getElementById('open');
+async function refreshTrainer(){
+ retry.hidden=true;open.hidden=true;
+ try{
+  if(!('serviceWorker' in navigator)||!isSecureContext)throw new Error('Open this link in Safari or Chrome over HTTPS to refresh the trainer.');
+  status.textContent='Downloading the latest game files…';
+  const registration=await navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'});
+  let failed=false;
+  const watch=worker=>worker?.addEventListener('statechange',()=>{if(worker.state==='redundant')failed=true;});
+  watch(registration.installing);registration.addEventListener('updatefound',()=>watch(registration.installing));
+  await registration.update();
+  const deadline=Date.now()+60000,requested=new Set();
+  while(Date.now()<deadline){
+   if(failed)throw new Error('The new game files could not be saved. Check your connection and try again.');
+   if(registration.waiting&&!requested.has(registration.waiting)){requested.add(registration.waiting);registration.waiting.postMessage({type:'ACTIVATE_UPDATE'});}
+   if(!registration.installing&&!registration.waiting&&registration.active?.state==='activated'){
+    // Navigating after activation uses the new worker's complete asset cache.
+    status.textContent='The latest trainer is ready. Prayer controls are inside the prayer tab.';
+    document.querySelector('h1').textContent='Olm Lab updated';open.hidden=false;return;
+   }
+   await new Promise(resolve=>setTimeout(resolve,250));
+  }
+  throw new Error('The download did not finish. Check your connection and try again.');
+ }catch(error){status.textContent=error.message||'Could not update. Check your connection and try again.';retry.hidden=false;}
+}
+retry.onclick=refreshTrainer;refreshTrainer();
+</script></body></html>

@@ -47,6 +47,11 @@ test('updates preserve other apps caches and activate only on the explicit updat
  await w.dispatch('activate');assert.equal(w.claimed(),1);assert.deepEqual(w.deleted,['olm-lab:'+w.scope+':old']);assert.ok(w.stores.has('another-app'));
  w.handlers.message({data:{type:'ACTIVATE_UPDATE'}});assert.equal(w.activated(),1);
 });
+test('refresh page bypasses the app cache online but remains available offline',async()=>{
+ const w=await workerHarness();await w.dispatch('install');
+ assert.equal((await w.request('update.html','navigate')).network,true);
+ w.offline();assert.equal((await w.request('update.html','navigate')).file,'./update.html');
+});
 test('install manifest stays within the project and both app icons have the advertised size',async()=>{
  const manifest=JSON.parse(await fs.readFile(new URL('../public/manifest.webmanifest',import.meta.url)));
  assert.equal(manifest.scope,'./');assert.equal(manifest.start_url,'./');assert.equal(manifest.display,'standalone');

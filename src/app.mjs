@@ -8,7 +8,7 @@ import {TickClock} from './clock.mjs';
 import {SPECIAL_PRACTICE,triggerSpecial,specialCue} from './special-practice.mjs';
 (async()=>{
 const $=id=>document.getElementById(id),clock=new TickClock();let game,view,icons,manifest,playing=false,lastTime=performance.now(),tab='inventory',uiVersion='',speed=1,coaching=false,rehearsal=null,endingTime=0,specialPractice=null,selectedSpell=false;
-initInterface();initAppInstall();
+initInterface();initAppInstall(()=>!playing&&(!game||game.tick===0));
 for(const [key,info]of Object.entries(SPECIAL_PRACTICE))$('special-select').add(new Option(info.name,key));
 $('special-select').onchange=()=>$('special-description').textContent=SPECIAL_PRACTICE[$('special-select').value].hint;$('special-select').onchange();
 function stopSpecialPractice(){if(!specialPractice)return;Object.assign(game.options,specialPractice.options);specialPractice=null;$('mechanics').value=game.options.mechanics;$('invincible').checked=game.options.invincible;}
