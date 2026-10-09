@@ -34,8 +34,8 @@ still available without a service worker.
 
 Desktop uses a RuneLite-style resizable viewport, floating minimap, four-by-seven
 inventory, equipment paper doll, and a five-column prayer book with cache sprites.
-Mobile uses right-side touch tabs, a folding panel, left-side protection-prayer
-shortcuts and safe-area spacing. Landscape offers the most arena space; portrait
+Mobile uses right-side touch tabs, a folding panel and safe-area spacing.
+Protection and offensive prayers are selected inside the prayer book. Landscape offers the most arena space; portrait
 is supported. Tap the selected tab again to fold the panel away.
 
 The **OLM LAB** menu at the top expands to show focus, phase, speed, reset,

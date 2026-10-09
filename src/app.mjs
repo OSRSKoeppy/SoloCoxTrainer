@@ -63,7 +63,6 @@ async function makePrayers(){
     if(protection||offensive){const key=protection?'protection':'offensive';b.dataset[key]=protection||offensive;b.onclick=()=>{game.pray(protection||offensive,!!offensive);updateUI();};}
     else{b.disabled=true;b.title=name+' · not simulated in this trainer';}
     $('prayers').append(b);
-    if(protection){const quick=b.cloneNode(true);quick.onclick=b.onclick;quick.setAttribute('aria-label','Quick '+name);$('quick-prayers').append(quick);}
   }
   for(const [,id]of EQUIPMENT)spriteURLs[id]=await asset(manifest.sprites[id].file);
 }
