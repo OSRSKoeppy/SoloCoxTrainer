@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
-import {HeadMotion,clipSample,clipDuration,movementSample} from './motion.mjs';
+import {HeadMotion,clipSample,clipDuration,movementSample,PoseTransition} from './motion.mjs';
 import {roomWalkable,PRACTICE_TILES} from './tiles.mjs';
 import {assembleRig,poseRig,PlayerMotion} from './player-rig.mjs';
 import {readAssetJson} from './assets.mjs';
@@ -24,7 +24,7 @@ function outlineGeometry(width){
 function tileOutline(color,width=.035){const mesh=new THREE.Mesh(outlineGeometry(width),new THREE.MeshBasicMaterial({color,depthWrite:false,depthTest:false,transparent:true,opacity:.9}));mesh.renderOrder=12;mesh.userData.outlineWidth=width;return mesh;
 }
 
-class AnimatedModel extends THREE.Group {
+export class AnimatedModel extends THREE.Group {
   constructor(data,textures,animated=false){
     super();this.data=data;this.parts=[];this.anim=0;this.started=0;this.frame=-1;
     const groups=new Map();data.faces.forEach((face,i)=>{const alpha=data.alphas[i]||0;if(alpha===255)return;const texture=data.textures[i]??-1,key=`${texture}:${alpha}`;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(i);});
@@ -42,7 +42,7 @@ class AnimatedModel extends THREE.Group {
     if(this.lastPoseTime===time&&this.lastPoseAnimation===this.anim&&this.lastPoseStart===this.started)return;
     this.lastPoseTime=time;this.lastPoseAnimation=this.anim;this.lastPoseStart=this.started;
     const {frame,next,fraction}=clipSample(clip,time-this.started,this.loop!==false),changed=frame!==this.frame;this.frame=frame;const vertices=clip.frames[frame],following=clip.frames[next];this.pose={vertices,following,fraction};
-    for(const {mesh,indices}of this.parts){const p=mesh.geometry.attributes.position;indices.forEach((v,i)=>{const a=vertices[v]||this.data.vertices[v],b=following[v]||a;p.setXYZ(i,(a[0]+(b[0]-a[0])*fraction)/128,(a[1]+(b[1]-a[1])*fraction)/128,(a[2]+(b[2]-a[2])*fraction)/128);});p.needsUpdate=true;if(changed)mesh.geometry.computeVertexNormals();}
+    for(const {mesh,indices}of this.parts){const p=mesh.geometry.attributes.position;indices.forEach((v,i)=>{const a=vertices[v]||this.data.vertices[v],b=following[v]||a;p.setXYZ(i,(a[0]+(b[0]-a[0])*fraction)/128,(a[1]+(b[1]-a[1])*fraction)/128,(a[2]+(b[2]-a[2])*fraction)/128);});p.needsUpdate=true;mesh.geometry.computeBoundingSphere();if(changed)mesh.geometry.computeVertexNormals();}
   }
   mouthPosition(){const v=this.pose?.vertices||this.data.vertices,b=this.pose?.following||v,f=this.pose?.fraction||0;
     if(!this.mouthIndices)this.mouthIndices=this.data.animations[7336].frames[0].map((p,i)=>({p,i})).filter(a=>a.p[1]>280).sort((a,b)=>b.p[2]-a.p[2]).slice(0,8).map(a=>a.i);
@@ -53,7 +53,7 @@ class AnimatedModel extends THREE.Group {
 
 export class View {
   constructor(container,overlay,manifest,scene,models,textures,playerRig){
-    this.playerRig=playerRig;this.playerMotion=new PlayerMotion(playerRig.sequences);this.poseCache=new Map();this.container=container;this.overlay=overlay;this.manifest=manifest;this.map=scene;this.models=models;this.textures=textures;
+    this.playerRig=playerRig;this.playerMotion=new PlayerMotion(playerRig.sequences);this.poseTransition=new PoseTransition();this.poseCache=new Map();this.container=container;this.overlay=overlay;this.manifest=manifest;this.map=scene;this.models=models;this.textures=textures;
     this.renderer=new THREE.WebGLRenderer({antialias:true,alpha:false,preserveDrawingBuffer:false});this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));this.renderer.outputColorSpace=THREE.SRGBColorSpace;container.prepend(this.renderer.domElement);
     this.scene=new THREE.Scene();this.scene.background=new THREE.Color('#080807');this.scene.fog=new THREE.Fog('#080807',30,65);
     this.scene.add(new THREE.AmbientLight(0xffffff,1.55));const light=new THREE.DirectionalLight(0xfff2cf,2);light.position.set(-10,25,16);this.scene.add(light);
@@ -89,22 +89,22 @@ export class View {
   cameraUpdate(){const zoom=this.zoom*Math.max(1,(this.followPlayer?1.1:1.45)/this.camera.aspect),radius=zoom*Math.cos(this.elevation);this.camera.position.set(this.focus.x+Math.sin(this.azimuth)*radius,this.focus.y+Math.sin(this.elevation)*zoom,this.focus.z+Math.cos(this.azimuth)*radius);this.camera.lookAt(this.focus);}
   resetCamera(){this.azimuth=.8;this.elevation=.88;this.zoom=20;}
   reset(){this.focusInitialized=false;this.playerMotion.reset();this.wasWon=false;this.handDeaths={};this.previousHP={};this.lastTransition=0;this.headHiddenAt=0;this.lastTick=-1;this.lastPhase=0;this.gearKey='';this.hits=[];this.pendingShots=[];this.playerTime=undefined;this.handBusy=null;this.clickMark.visible=false;this.hoverTile.visible=false;
-    this.encounterEffects.clear();this.lastPlayerPose=null;
+    this.encounterEffects.clear();this.lastPlayerPose=null;this.poseTransition.reset();this.clickFeedback=null;
     for(const p of this.projectiles){this.scene.remove(p.mesh);this.disposeEffect(p.mesh);}this.projectiles=[];
   }
   rotate(dx,dy){this.azimuth-=dx*.007;this.elevation=THREE.MathUtils.clamp(this.elevation+dy*.004,.35,1.35);}
   zoomBy(delta){this.zoom=THREE.MathUtils.clamp(this.zoom+delta*.015,12,40);}
   pick(clientX,clientY,game){const rect=this.container.getBoundingClientRect();this.mouse.set((clientX-rect.left)/rect.width*2-1,-((clientY-rect.top)/rect.height)*2+1);this.raycaster.setFromCamera(this.mouse,this.camera);
-    const targets=this.targets.filter(t=>t.visible),hit=this.raycaster.intersectObjects(targets,true)[0];if(hit&&game.canAttack(hit.object.userData.target))return{target:hit.object.userData.target,point:hit.point};
+    const targets=this.targets.filter(t=>t.visible&&game.canAttack(t.userData.target)),hit=this.raycaster.intersectObjects(targets,true)[0];if(hit)return{target:hit.object.userData.target,point:hit.point};
     const ground=this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,1,0),0),new THREE.Vector3());if(!ground)return null;const tile={x:Math.floor(ground.x+32.5),y:Math.floor(44.5-ground.z)};if(game.walkable.has(`${tile.x},${tile.y}`))return{tile,point:ground};return null;
   }
-  showClick(hit){if(!hit?.point)return;this.clickMark.position.copy(hit.tile?point(hit.tile.x+.5,hit.tile.y+.5,.04):hit.point);this.clickMark.visible=!!hit.tile;this.clickAt=this.time||0;}
+  showClick(hit,screen){if(!hit?.point)return;this.clickFeedback={...(screen||this.project(hit.point)),attack:!!hit.target,started:performance.now()};this.clickMark.position.copy(hit.tile?point(hit.tile.x+.5,hit.tile.y+.5,.04):hit.point);this.clickMark.visible=!!hit.tile;this.clickAt=this.time||0;}
   hover(hit){this.hoverTile.visible=!!hit?.tile;if(hit?.tile)this.hoverTile.position.copy(point(hit.tile.x+.5,hit.tile.y+.5,.025));}
   gear(game,time){const ids=Object.entries(game.equipment).map(([k,v])=>`${k}:${v}`).join(',');if(ids===this.gearKey)return;this.gearKey=ids;this.poseCache.clear();for(const part of this.playerParts){this.player.remove(part);part.dispose();}this.playerParts=[];
     const hidden=new Set([0,2,3,4,5,6]);const keys=this.manifest.playerKits.filter(kit=>!hidden.has(kit.part)||((kit.part===0&&!game.equipment.head)||(kit.part===2&&!game.equipment.body)||(kit.part===3&&!game.equipment.body)||(kit.part===4&&!game.equipment.hands)||(kit.part===5&&!game.equipment.legs)||(kit.part===6&&!game.equipment.feet))).map(k=>k.key);
     for(const id of Object.values(game.equipment))keys.push(...(this.manifest.items[id]?.wearModels||[]));
     for(const key of keys){const part=new AnimatedModel(this.models[key],this.textures,true);this.player.add(part);this.playerParts.push(part);}
-    this.rig=assembleRig(keys.map(key=>({key,data:this.models[key]})),this.playerRig.rigs);
+    this.rig=assembleRig(keys.map(key=>({key,data:this.models[key]})),this.playerRig.rigs);this.poseTransition.reset();
   }
   bossPhase(game,time){if(this.lastPhase===game.phase)return;const east=game.east;
     // Keep the active wall in view when Olm changes sides between phases.
@@ -169,12 +169,16 @@ export class View {
   }
   animatePlayer(time,moving,pace,stance){
     const sample=this.playerMotion.sample(time,moving,pace,stance),{sequence,frame,next,fraction,movement,movementSample}=sample;
-    const poseKey=[this.gearKey,sequence.name,frame,next,fraction,movement?.name,movementSample?.frame,movementSample?.fraction].join(':');if(poseKey===this.lastPlayerPose)return;this.lastPlayerPose=poseKey;
+    const poseKey=[this.gearKey,sequence.name,frame,next,fraction,movement?.name,movementSample?.frame,movementSample?.fraction,time].join(':');if(poseKey===this.lastPlayerPose)return;this.lastPlayerPose=poseKey;
     const pose=(frame,mf=0)=>{const key=sequence.name+':'+frame+':'+(movement?.name||'')+':'+mf;if(!this.poseCache.has(key)){if(this.poseCache.size>48)this.poseCache.delete(this.poseCache.keys().next().value);this.poseCache.set(key,poseRig(this.rig,sequence,frame,movement,mf));}return this.poseCache.get(key);};
     const a=pose(frame,movementSample?.frame),b=pose(next,movementSample?.frame),c=movement?pose(frame,movementSample.next):a,d=movement?pose(next,movementSample.next):b,mix=movement?movementSample.fraction:0;
-    this.playerParts.forEach((part,partIndex)=>{const offset=this.rig.offsets[partIndex];for(const {mesh,indices}of part.parts){const attribute=mesh.geometry.attributes.position,buffer=attribute.array;for(let i=0;i<indices.length;i++){const j=indices[i]+offset;for(let axis=0;axis<3;axis++){const start=a[j][axis]+(b[j][axis]-a[j][axis])*fraction,end=c[j][axis]+(d[j][axis]-c[j][axis])*fraction;buffer[i*3+axis]=(start+(end-start)*mix)/128;}}attribute.needsUpdate=true;mesh.geometry.computeVertexNormals();}});
+    const interpolated=a.map((v,j)=>v.map((n,axis)=>{const start=n+(b[j][axis]-n)*fraction,end=c[j][axis]+(d[j][axis]-c[j][axis])*fraction;return start+(end-start)*mix;}));
+    const displayed=this.poseTransition.sample(interpolated,[sequence.name,movement?.name,this.playerMotion.action?.started].join(':'),time);
+    this.playerParts.forEach((part,partIndex)=>{const offset=this.rig.offsets[partIndex];for(const {mesh,indices}of part.parts){const attribute=mesh.geometry.attributes.position,buffer=attribute.array;for(let i=0;i<indices.length;i++){const vertex=displayed[indices[i]+offset];for(let axis=0;axis<3;axis++)buffer[i*3+axis]=vertex[axis]/128;}attribute.needsUpdate=true;mesh.geometry.computeVertexNormals();}});
   }
   drawOverlay(game,time,progress){const ctx=this.overlay.getContext('2d');ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);ctx.clearRect(0,0,this.container.clientWidth,this.container.clientHeight);ctx.font='bold 13px monospace';ctx.textAlign='center';
+    const click=this.clickFeedback,age=click?performance.now()-click.started:Infinity;
+    if(age<400){const size=7+3*Math.sin(age/400*Math.PI);ctx.save();ctx.translate(click.x,click.y);ctx.lineCap='square';for(const [color,width]of [['#17120a',5],[click.attack?'#ff3020':'#ffe700',2]]){ctx.strokeStyle=color;ctx.lineWidth=width;ctx.beginPath();ctx.moveTo(-size,-size);ctx.lineTo(size,size);ctx.moveTo(size,-size);ctx.lineTo(-size,size);ctx.stroke();}ctx.restore();}
     for(const target of ['mage','melee','head']){if(target==='head'&&game.phase<4||target!=='head'&&game.phase===4||game.handHP[target]<=0)continue;
       const r=game.targetRect(target),p=this.project(point(game.east?39:26,r.y+2.5,3.8));ctx.fillStyle='#000';ctx.fillRect(p.x-36,p.y-5,72,8);ctx.fillStyle='#bd302a';ctx.fillRect(p.x-35,p.y-4,70,6);ctx.fillStyle='#38b12d';ctx.fillRect(p.x-35,p.y-4,70*game.handHP[target]/(target==='head'?800:game.options.handHealth),6);}
     this.hits=this.hits.filter(h=>time-h.time<950);for(const hit of this.hits){if(time<hit.time)continue;const p=this.project(hit.followPlayer?this.player.position.clone().add(new THREE.Vector3(0,1.65,0)):hit.point);p.x+=(hit.hitSlot||0)*25;p.y-=(time-hit.time)/120;ctx.fillStyle=hit.healing?'#14841d':hit.damage?'#a5140d':'#202cbb';ctx.beginPath();ctx.arc(p.x,p.y,12,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#d1a889';ctx.lineWidth=1;ctx.stroke();ctx.fillStyle='#fff';ctx.fillText(hit.damage,p.x,p.y+4);}

@@ -9,6 +9,21 @@ export function clipSample(clip,elapsed,loop=true){const lengths=clip.lengths?.l
  return{frame,next:frame+1<clip.frames.length?frame+1:loop?0:frame,fraction:Math.max(0,Math.min(ms/(lengths[frame]*20),1)),finished:!loop&&elapsed>=duration};
 }
 export function movementSample(points,progress){if(!points?.length)return{x:0,y:0};const t=Math.max(0,Math.min(progress,1))*(points.length-1),index=Math.min(Math.floor(t),points.length-1),a=points[index],b=points[Math.min(index+1,points.length-1)],fraction=t-index;return{x:a.x+(b.x-a.x)*fraction,y:a.y+(b.y-a.y)*fraction};}
+// Short render-only crossfade. The server tick, attack event and cache clip
+// timeline are unchanged; a completed swing no longer snaps into its stance.
+export class PoseTransition {
+ constructor(duration=100){this.duration=duration;this.reset();}
+ reset(){this.key=null;this.output=null;this.from=null;}
+ sample(pose,key,time){
+  if(this.output?.length!==pose.length)this.reset();
+  if(key!==this.key){this.from=this.output;this.started=time;this.key=key;}
+  const progress=Math.min(1,Math.max(0,(time-this.started)/this.duration));
+  const mix=progress*progress*(3-2*progress);
+  this.output=this.from&&progress<1?pose.map((v,i)=>v.map((n,axis)=>this.from[i][axis]+(n-this.from[i][axis])*mix)):pose;
+  if(progress>=1)this.from=null;
+  return this.output;
+ }
+}
 export class HeadMotion {
  constructor(model){this.model=model;this.reset(1,0);}
  reset(phase,time,facing='middle'){this.override=null;this.phase=phase;this.facing=facing;this.action='idle';this.from=facing;this.started=time;this.until=time;}

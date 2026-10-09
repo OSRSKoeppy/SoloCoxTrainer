@@ -66,7 +66,7 @@ export class Encounter {
   equip(index){const id=this.inventory[index],item=this.items[id];if(!item?.slot||!item.wearModels?.length)return false;
     this.inventory[index]=this.equipment[item.slot]||null;this.equipment[item.slot]=id;this.switches++;this.log('Equipment',`You equip ${item.name}.`);return true;}
   unequip(slot){const index=this.inventory.indexOf(null);if(index<0)return;this.inventory[index]=this.equipment[slot];delete this.equipment[slot];}
-  drink(index){const id=this.inventory[index];if(![6685,3024].includes(id)||this.tick-this.drinkAt<3)return;
+  drink(index){if(!this.active)return;const id=this.inventory[index];if(![6685,3024].includes(id)||this.tick-this.drinkAt<3)return;
     this.drinkAt=this.tick;
     if(id===6685){this.hp=Math.min(115,this.hp+16);for(const stat of ['attack','strength','magic'])this.stats[stat]=Math.max(1,Math.floor(this.stats[stat]*.9)-2);this.log('Game','You drink some Saradomin brew. Your combat stats are reduced.');}
     else{this.prayerPoints=Math.min(99,this.prayerPoints+32);for(const stat of ['attack','strength','magic'])this.stats[stat]=Math.min(99,this.stats[stat]+32);this.log('Game','You drink some super restore.');}
