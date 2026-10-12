@@ -9,6 +9,16 @@ export function clipSample(clip,elapsed,loop=true){const lengths=clip.lengths?.l
  return{frame,next:frame+1<clip.frames.length?frame+1:loop?0:frame,fraction:Math.max(0,Math.min(ms/(lengths[frame]*20),1)),finished:!loop&&elapsed>=duration};
 }
 export function movementSample(points,progress){if(!points?.length)return{x:0,y:0};const t=Math.max(0,Math.min(progress,1))*(points.length-1),index=Math.min(Math.floor(t),points.length-1),a=points[index],b=points[Math.min(index+1,points.length-1)],fraction=t-index;return{x:a.x+(b.x-a.x)*fraction,y:a.y+(b.y-a.y)*fraction};}
+export function playerFacing(game,position,next,moving){
+ if(game.target&&game.canAttack(game.target)){
+  const target=game.targetPoint(game.target);
+  return Math.atan2(target.x-(position.x+.5),-(target.y-(position.y+.5)));
+ }
+ return moving?Math.atan2(next.x-position.x,-(next.y-position.y)):game.facing;
+}
+// Four 100 ms client frames, yellow for walking and red for interaction.
+// Reference: open-osrs/runelite Client.drawLoggedIn, mouseCrossState / 100.
+export function clickCrossFrame(elapsed,attack=false){return elapsed>=0&&elapsed<400?Math.floor(elapsed/100)+(attack?4:0):-1;}
 // Short render-only crossfade. The server tick, attack event and cache clip
 // timeline are unchanged; a completed swing no longer snaps into its stance.
 export class PoseTransition {

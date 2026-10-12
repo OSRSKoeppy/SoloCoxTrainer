@@ -3,10 +3,33 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import * as THREE from 'three';
 import {AnimatedModel,View} from '../src/render.mjs';
-import {PoseTransition} from '../src/motion.mjs';
+import {PoseTransition,playerFacing,clickCrossFrame} from '../src/motion.mjs';
+import {PNG} from 'pngjs';
 import {Encounter} from '../src/engine.mjs';
 const scene=JSON.parse(fs.readFileSync(new URL('../public/assets/scene.json',import.meta.url)));
 const items=JSON.parse(fs.readFileSync(new URL('../public/assets/manifest.json',import.meta.url))).items;
+
+test('selected claws are faced before the next attack, including approach and switching targets on either wall',()=>{
+ for(const phase of [1,2]){
+  const e=new Encounter(scene,items,{phase,invincible:true});e.cooldown=4;e.facing=0;
+  const position={x:32.25,y:44.75},next={x:33,y:45};
+  for(const hand of ['mage','melee']){
+   e.attack(hand);const target=e.targetPoint(hand),angle=Math.atan2(target.x-position.x-.5,-(target.y-position.y-.5));
+   assert.equal(playerFacing(e,position,next,false),angle);assert.equal(playerFacing(e,position,next,true),angle);
+   assert.equal(e.cooldown,4);assert.equal(e.attackCount,0);assert.equal(e.tick,0);
+  }
+  e.move(next);assert.equal(playerFacing(e,position,next,true),Math.atan2(.75,-.25));assert.equal(playerFacing(e,position,next,false),0);
+ }
+});
+
+test('click crosses play each original frame once and end at 400ms, without fading or looping',()=>{
+ for(const attack of [false,true])for(const [elapsed,frame]of [[-1,-1],[0,0],[99,0],[100,1],[199,1],[200,2],[299,2],[300,3],[399,3],[400,-1],[800,-1]])assert.equal(clickCrossFrame(elapsed,attack),frame<0?-1:frame+(attack?4:0));
+ const manifest=JSON.parse(fs.readFileSync(new URL('../public/assets/manifest.json',import.meta.url)));
+ const png=PNG.sync.read(fs.readFileSync(new URL('../public/assets/'+manifest.crossSprites.file,import.meta.url)));
+ assert.equal(png.width,128);assert.equal(png.height,16);
+ const counts=[];for(let frame=0;frame<8;frame++){let count=0;for(let y=0;y<16;y++)for(let x=0;x<16;x++){const i=(y*128+frame*16+x)*4;if(png.data[i+3]){count++;const color=[...png.data.slice(i,i+3)];assert.deepEqual(color,png.data[i]?[255,frame<4?255:0,0]:[0,0,1]);}}counts.push(count);}
+ assert.ok(counts.every(n=>n>0));assert.deepEqual(counts.slice(0,4),counts.slice(4));
+});
 
 test('animated target picking follows its displayed geometry outside the original bounds',()=>{
  const rest=[[-64,-64,0],[64,-64,0],[0,64,0]],moved=rest.map(([x,y,z])=>[x+640,y,z]);
