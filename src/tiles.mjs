@@ -20,3 +20,12 @@ export function meleeReach(p,r) {
 }
 export function mapPoint(p) {return{x:88+(p.x+.5-33)*8,y:88-(p.y+.5-44.5)*8};}
 export function mapTile(p) {return{x:Math.floor((p.x-88)/8+33),y:Math.floor((88-p.y)/8+44.5)};}
+// Continuous room coordinates: valid floor clicks keep their exact tile;
+// blocked and boundary clicks snap to the closest walkable tile centre.
+export function closestWalkableTile(p,cells){
+ if(!Number.isFinite(p.x)||!Number.isFinite(p.y))return null;
+ const tile={x:Math.floor(p.x),y:Math.floor(p.y)};if(cells.has(`${tile.x},${tile.y}`))return tile;
+ let nearest=null,best=Infinity;
+ for(const cell of cells){const [x,y]=cell.split(',').map(Number),d=(x+.5-p.x)**2+(y+.5-p.y)**2;if(d<best){best=d;nearest={x,y};}}
+ return nearest;
+}

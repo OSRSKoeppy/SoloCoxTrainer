@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {HeadMotion,clipSample,clipDuration,movementSample,PoseTransition,playerFacing,clickCrossFrame} from './motion.mjs';
-import {roomWalkable,PRACTICE_TILES} from './tiles.mjs';
+import {roomWalkable,PRACTICE_TILES,closestWalkableTile} from './tiles.mjs';
+import {convexHull,silhouetteHit} from './picking.mjs';
+import {projectilePose} from './effect-timing.mjs';
 import {assembleRig,poseRig,PlayerMotion} from './player-rig.mjs';
 import {readAssetJson} from './assets.mjs';
 import {EncounterEffects} from './effects.mjs';
@@ -27,14 +29,15 @@ function tileOutline(color,width=.035){const mesh=new THREE.Mesh(outlineGeometry
 export class AnimatedModel extends THREE.Group {
   constructor(data,textures,animated=false){
     super();this.data=data;this.parts=[];this.anim=0;this.started=0;this.frame=-1;
-    const groups=new Map();data.faces.forEach((face,i)=>{const alpha=data.alphas[i]||0;if(alpha===255)return;const texture=data.textures[i]??-1,key=`${texture}:${alpha}`;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(i);});
+    const alphaClips=Object.values(data.animations).filter(clip=>clip.alphas),alphaAnimated=alphaClips.length>0;
+    const groups=new Map();data.faces.forEach((face,i)=>{const alpha=(data.alphas[i]||0)&255;if(alpha===255&&!alphaAnimated)return;const texture=data.textures[i]??-1,track=alphaClips.flatMap(clip=>clip.alphas.map(frame=>frame[i])).join(','),key=`${texture}:${alpha}:${track}`;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(i);});
     for(const [key,faces]of groups){
       const [texture,alpha]=key.split(':').map(Number),positions=[],colors=[],uv=[],indices=[];
       for(const faceIndex of faces){const face=data.faces[faceIndex],color=texture>=0?new THREE.Color('white'):hsl(data.colors[faceIndex]);
         face.forEach((v,j)=>{const coords=data.vertices[v];positions.push(...coords.map(n=>n/128));colors.push(color.r,color.g,color.b);uv.push(data.uvU[faceIndex]?.[j]||0,data.uvV[faceIndex]?.[j]||0);indices.push(v);});}
       const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));geometry.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));geometry.computeVertexNormals();geometry.computeBoundingSphere();
-      const material=new THREE.MeshLambertMaterial({vertexColors:true,map:textures[texture]||null,flatShading:true,side:THREE.DoubleSide,transparent:alpha>0,opacity:1-alpha/255,alphaTest:texture>=0?.1:0});
-      const mesh=new THREE.Mesh(geometry,material);mesh.frustumCulled=!animated;this.add(mesh);this.parts.push({mesh,indices});
+      const material=new THREE.MeshLambertMaterial({vertexColors:true,map:textures[texture]||null,flatShading:true,side:THREE.DoubleSide,transparent:alphaAnimated||alpha>0,depthWrite:!alphaAnimated&&alpha===0,opacity:1-alpha/255,alphaTest:texture>=0?.1:0});
+      const mesh=new THREE.Mesh(geometry,material);mesh.frustumCulled=!animated;this.add(mesh);this.parts.push({mesh,indices,faces});
     }
   }
   setAnimation(id,time,{loop=true,started=time}={}){if(this.anim!==id||this.started!==started){this.anim=id;this.started=started;this.frame=-1;}this.loop=loop;}
@@ -42,7 +45,7 @@ export class AnimatedModel extends THREE.Group {
     if(this.lastPoseTime===time&&this.lastPoseAnimation===this.anim&&this.lastPoseStart===this.started)return;
     this.lastPoseTime=time;this.lastPoseAnimation=this.anim;this.lastPoseStart=this.started;
     const {frame,next,fraction}=clipSample(clip,time-this.started,this.loop!==false),changed=frame!==this.frame;this.frame=frame;const vertices=clip.frames[frame],following=clip.frames[next];this.pose={vertices,following,fraction};
-    for(const {mesh,indices}of this.parts){const p=mesh.geometry.attributes.position;indices.forEach((v,i)=>{const a=vertices[v]||this.data.vertices[v],b=following[v]||a;p.setXYZ(i,(a[0]+(b[0]-a[0])*fraction)/128,(a[1]+(b[1]-a[1])*fraction)/128,(a[2]+(b[2]-a[2])*fraction)/128);});p.needsUpdate=true;mesh.geometry.computeBoundingSphere();if(changed)mesh.geometry.computeVertexNormals();}
+    for(const {mesh,indices,faces}of this.parts){const p=mesh.geometry.attributes.position;indices.forEach((v,i)=>{const a=vertices[v]||this.data.vertices[v],b=following[v]||a;p.setXYZ(i,(a[0]+(b[0]-a[0])*fraction)/128,(a[1]+(b[1]-a[1])*fraction)/128,(a[2]+(b[2]-a[2])*fraction)/128);});p.needsUpdate=true;mesh.geometry.computeBoundingSphere();if(changed)mesh.geometry.computeVertexNormals();if(clip.alphas){const a=clip.alphas[frame][faces[0]],b=clip.alphas[next][faces[0]];mesh.material.opacity=1-(a+(b-a)*fraction)/255;mesh.visible=mesh.material.opacity>.01;}}
   }
   mouthPosition(){const v=this.pose?.vertices||this.data.vertices,b=this.pose?.following||v,f=this.pose?.fraction||0;
     if(!this.mouthIndices)this.mouthIndices=this.data.animations[7336].frames[0].map((p,i)=>({p,i})).filter(a=>a.p[1]>280).sort((a,b)=>b.p[2]-a.p[2]).slice(0,8).map(a=>a.i);
@@ -90,14 +93,25 @@ export class View {
   cameraUpdate(){const zoom=this.zoom*Math.max(1,(this.followPlayer?1.1:1.45)/this.camera.aspect),radius=zoom*Math.cos(this.elevation);this.camera.position.set(this.focus.x+Math.sin(this.azimuth)*radius,this.focus.y+Math.sin(this.elevation)*zoom,this.focus.z+Math.cos(this.azimuth)*radius);this.camera.lookAt(this.focus);}
   resetCamera(){this.azimuth=.8;this.elevation=.88;this.zoom=20;}
   reset(){this.focusInitialized=false;this.playerMotion.reset();this.wasWon=false;this.handDeaths={};this.previousHP={};this.lastTransition=0;this.headHiddenAt=0;this.lastTick=-1;this.lastPhase=0;this.gearKey='';this.hits=[];this.pendingShots=[];this.playerTime=undefined;this.handBusy=null;this.hoverTile.visible=false;
-    this.encounterEffects.clear();this.lastPlayerPose=null;this.poseTransition.reset();this.clickFeedback=null;
+    this.encounterEffects.clear();this.lastPlayerPose=null;this.poseTransition.reset();this.clickFeedback=null;this.pickShapes=[];this.pickTime=-Infinity;
     for(const p of this.projectiles){this.scene.remove(p.mesh);this.disposeEffect(p.mesh);}this.projectiles=[];
   }
   rotate(dx,dy){this.azimuth-=dx*.007;this.elevation=THREE.MathUtils.clamp(this.elevation+dy*.004,.35,1.35);}
   zoomBy(delta){this.zoom=THREE.MathUtils.clamp(this.zoom+delta*.015,12,40);}
   pick(clientX,clientY,game){const rect=this.container.getBoundingClientRect();this.mouse.set((clientX-rect.left)/rect.width*2-1,-((clientY-rect.top)/rect.height)*2+1);this.raycaster.setFromCamera(this.mouse,this.camera);
     const targets=this.targets.filter(t=>t.visible&&game.canAttack(t.userData.target)),hit=this.raycaster.intersectObjects(targets,true)[0];if(hit)return{target:hit.object.userData.target,point:hit.point};
-    const ground=this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,1,0),0),new THREE.Vector3());if(!ground)return null;const tile={x:Math.floor(ground.x+32.5),y:Math.floor(44.5-ground.z)};if(game.walkable.has(`${tile.x},${tile.y}`))return{tile,point:ground};return null;
+    const p={x:clientX-rect.left,y:clientY-rect.top},tolerance=globalThis.document?.body?.dataset.interface==='mobile'?10:6;
+    const shape=this.pickShapes?.find(s=>game.canAttack(s.target)&&silhouetteHit(p,s.hull,tolerance));if(shape)return{target:shape.target,point:this.raycaster.ray.at(shape.distance,new THREE.Vector3())};
+    const ground=this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,1,0),0),new THREE.Vector3());if(!ground)return null;const tile=closestWalkableTile({x:ground.x+32.5,y:44.5-ground.z},game.walkable);return tile?{tile,point:ground}:null;
+  }
+  updatePickShapes(game,time){
+    const key=[this.azimuth,this.elevation,this.zoom,this.container.clientWidth,this.container.clientHeight,game.phase].join(':');
+    if(this.pickKey===key&&time-(this.pickTime??-Infinity)<80)return;this.pickKey=key;this.pickTime=time;this.pickShapes=[];
+    for(const obj of this.targets.filter(t=>t.visible&&game.canAttack(t.userData.target))){
+      obj.updateMatrixWorld(true);const vertices=obj.pose?.vertices||obj.data.vertices,following=obj.pose?.following||vertices,fraction=obj.pose?.fraction||0;
+      const points=vertices.map((v,i)=>{const p=new THREE.Vector3(...v.map((n,a)=>(n+(following[i][a]-n)*fraction)/128));obj.localToWorld(p);return this.project(p);});
+      this.pickShapes.push({target:obj.userData.target,hull:convexHull(points),distance:this.camera.position.distanceTo(obj.position)});
+    }
   }
   showClick(hit,screen){if(!hit?.point)return;this.clickFeedback={...(screen||this.project(hit.point)),attack:!!hit.target,started:performance.now()};}
   hover(hit){this.hoverTile.visible=!!hit?.tile;if(hit?.tile)this.hoverTile.position.copy(point(hit.tile.x+.5,hit.tile.y+.5,.025));}
@@ -124,23 +138,23 @@ export class View {
     for(const e of game.effects){if(e.type==='attack'){
       this.playerMotion.attack(e.animation||game.animation,time);
 
-      if(e.style!=='melee')this.projectile(point(e.from.x+.5,e.from.y+.5,1),point(...Object.values(game.targetPoint(e.target)),2),e.style==='mage'?0x59bdb6:0xeeeecc,time);
+      if(e.style!=='melee')this.projectile(point(e.from.x+.5,e.from.y+.5,1.1),point(...Object.values(game.targetPoint(e.target)),2),0xffffff,time,'player-'+e.style,1200);
     }else if(e.type==='hand-hit')this.hits.push({time,point:point(...Object.values(game.targetPoint(e.target)),2.7),damage:e.damage,healing:e.healing,hitSlot:e.hitSlot});
     else if(e.type==='player-hit')this.hits.push({time,followPlayer:true,damage:e.damage});
-    else if(e.type==='hazard-impact')this.encounterEffects.burst('explosion',e.x,e.y,time);
+    else if(e.type==='hazard-impact')this.encounterEffects.burst(e.hazard==='crystal'?'crystal-shatter':'explosion',e.x,e.y,time);
     else if(e.type==='hand-special'){const id={crystal:7358,lightning:7356,portal:7359,heal:7357}[e.special];this.handBusy={id,started:time,until:time+clipDuration(this.models['olm-melee'].animations[id])};}
     else if(e.type==='olm-power')this.headMotion.handle(e,time,game.phase);
     else if(e.type==='turn')this.headMotion.handle(e,time,game.phase);
     else if(e.type==='olm-projectile'){
       this.headMotion.handle(e,time,game.phase);const aim=e.aim||game.position;
-      this.pendingShots.push({due:time+360,to:point(aim.x+.5,aim.y+.5,1),color:e.sphere?{mage:0xaa55ff,range:0x44ff55,melee:0xff3322}[e.style]:e.style==='mage'?0x4db947:0xcbbce8,effect:e.sphere?null:e.style,duration:e.sphere?1440:840});
+      this.pendingShots.push({due:time+360,to:point(aim.x+.5,aim.y+.5,e.groundTarget?.05:1),color:0xffffff,effect:e.special==='pool'?'pool-projectile':e.special==='burn'?'burn-projectile':e.sphere?'sphere-'+e.style:e.style,duration:e.sphere?1440:840,followPlayer:!e.groundTarget,arc:e.groundTarget?.5:0});
     }}
     this.lastTick=game.tick;
     this.route.geometry.dispose();this.route.geometry=new THREE.BufferGeometry().setFromPoints([game.position,...game.path].map(p=>point(p.x+.5,p.y+.5,.03)));
   }
-  effectModel(name,time){const def=this.manifest.effects[name],obj=new AnimatedModel(this.models[def.key],this.textures,true);if(def.animation>=0)obj.setAnimation(def.animation,time);return obj;}
+  effectModel(name,time){const def=this.manifest.effects[name],obj=new AnimatedModel(this.models[def.key],this.textures,true);if(def.animation>=0)obj.setAnimation(def.animation,time);if(!['crystal','burst','burst-seed','bomb'].includes(name))for(const {mesh}of obj.parts){const old=mesh.material;mesh.material=new THREE.MeshBasicMaterial({vertexColors:true,map:old.map,side:THREE.DoubleSide,transparent:old.transparent,opacity:old.opacity,alphaTest:old.alphaTest,depthWrite:!old.transparent});old.dispose();}return obj;}
   disposeEffect(mesh){mesh.traverse(o=>{o.geometry?.dispose();o.material?.dispose();});}
-  projectile(from,to,color,time,effect=null,duration=1200,followPlayer=false){const mesh=effect?this.effectModel(effect,time):new THREE.Mesh(new THREE.IcosahedronGeometry(followPlayer?.27:.13,1),new THREE.MeshBasicMaterial({color}));if(!effect&&followPlayer){const halo=new THREE.Mesh(new THREE.IcosahedronGeometry(.4,1),new THREE.MeshBasicMaterial({color,transparent:true,opacity:.2,depthWrite:false}));mesh.add(halo);}this.scene.add(mesh);this.projectiles.push({mesh,from,to,time,duration,followPlayer});}
+  projectile(from,to,color,time,effect,duration=1200,followPlayer=false,arc=0){const model=this.effectModel(effect,time),mesh=new THREE.Group();model.updateMatrixWorld(true);const center=new THREE.Box3().setFromObject(model).getCenter(new THREE.Vector3());model.position.sub(center);mesh.add(model);this.scene.add(mesh);this.projectiles.push({mesh,model,from,to,time,duration,followPlayer,arc});}
   project(p){const v=p.clone().project(this.camera);return{x:(v.x*.5+.5)*this.container.clientWidth,y:(-.5*v.y+.5)*this.container.clientHeight};}
   draw(game,time,progress){
     this.time=time;this.gear(game,time);if(game.tick!==this.lastTick)this.tick(game,time);
@@ -162,11 +176,11 @@ export class View {
       const fallen=loc.id===29885?(game.phase===4||game.handHP.melee===0||!!game.transition):loc.id===29888?(game.phase===4||game.handHP.mage===0||!!game.transition):false;
       const death=this.handDeaths[loc.id===29885?'melee':'mage'];obj.visible=inactive||fallen&&!(death&&time<death.until);
     }
-    this.targets[0].updateMatrixWorld(true);for(const shot of this.pendingShots)if(time>=shot.due)this.projectile(this.targets[0].mouthPosition(),shot.to,shot.color,shot.due,shot.effect,shot.duration,true);this.pendingShots=this.pendingShots.filter(shot=>time<shot.due);
-    for(const p of this.projectiles){const fraction=(time-p.time)/p.duration;p.mesh.animate?.(time);if(p.followPlayer)p.to.copy(this.player.position).add(new THREE.Vector3(0,1,0));p.mesh.position.lerpVectors(p.from,p.to,THREE.MathUtils.clamp(fraction,0,1));if(fraction>1){this.scene.remove(p.mesh);this.disposeEffect(p.mesh);}}
-    this.projectiles=this.projectiles.filter(p=>time-p.time<=p.duration);
-    this.encounterEffects.draw(game,time,this.player);
-    this.renderer.render(this.scene,this.camera);this.drawOverlay(game,time,progress);
+    this.targets[0].updateMatrixWorld(true);for(const shot of this.pendingShots)if(time>=shot.due)this.projectile(this.targets[0].mouthPosition(),shot.to,shot.color,shot.due,shot.effect,shot.duration,shot.followPlayer,shot.arc||0);this.pendingShots=this.pendingShots.filter(shot=>time<shot.due);
+    for(const p of this.projectiles){p.model.animate(time);if(p.followPlayer)p.to.copy(this.player.position).add(new THREE.Vector3(0,1,0));const pose=projectilePose(p.from.toArray(),p.to.toArray(),time,p.time,p.duration,p.arc);p.mesh.position.fromArray(pose.position);const direction=new THREE.Vector3(...pose.direction);if(direction.lengthSq())p.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,-1),direction.normalize());if(pose.finished){this.scene.remove(p.mesh);this.disposeEffect(p.mesh);}}
+    this.projectiles=this.projectiles.filter(p=>time-p.time<p.duration);
+    this.encounterEffects.draw(game,time,this.player,this.camera);
+    this.renderer.render(this.scene,this.camera);this.updatePickShapes(game,time);this.drawOverlay(game,time,progress);
   }
   animatePlayer(time,moving,pace,stance){
     const sample=this.playerMotion.sample(time,moving,pace,stance),{sequence,frame,next,fraction,movement,movementSample}=sample;

@@ -20,6 +20,7 @@ export function triggerSpecial(game,kind){
   else if(kind.startsWith('sphere-'))game.sphere(kind.slice(7));
   else if(kind==='pools'){
     const y=game.position.y;game.addHazard('pool',30,y,10,3);game.addHazard('pool',35,y,10,3);
+    for(const x of [30,35])game.effects.push({type:'olm-projectile',special:'pool',aim:{x,y},groundTarget:true,facing:game.headFacing,tick:game.tick});
     game.effects.push({type:'olm-power',special:'pools',facing:game.headFacing,tick:game.tick});
   }else game.phaseAttack(kind);
   game.feedback=SPECIAL_PRACTICE[kind].hint;
@@ -27,6 +28,7 @@ export function triggerSpecial(game,kind){
 export function specialCue(game){
   const sphere=game.incoming.find(h=>h.sphere);
   if(sphere)return{title:`Protect from ${sphere.sphere==='range'?'Missiles':sphere.sphere==='mage'?'Magic':'Melee'}`,detail:`Prayer sphere · ${Math.max(0,sphere.due-game.tick)} ticks`,tone:sphere.sphere};
+  if(game.incoming.some(h=>h.burn))return{title:'Burn with me',detail:'Incoming green fireball',tone:'danger'};
   if(game.tick<game.prayerLockedUntil)return{title:'Prayer disabled',detail:'Lightning hit · move out of the lane',tone:'danger'};
   const urgent=game.hazards.filter(h=>['portal','pool','flame','bomb','burst'].includes(h.type)).sort((a,b)=>a.due-b.due)[0];
   if(urgent){const names={portal:['Teleport portal','Reach the purple portal'],pool:['Healing pools','Stand on a blue pool'],flame:['Flame walls','Cast a water spell'],bomb:['Crystal bomb','Move four tiles away'],burst:['Crystal burst','Move off the seed']};const [title,detail]=names[urgent.type];return{title,detail:detail+(urgent.due>game.tick?` · ${urgent.due-game.tick} ticks`:''),tone:urgent.type==='pool'?'range':'danger'};}

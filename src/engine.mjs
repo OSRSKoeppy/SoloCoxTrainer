@@ -60,7 +60,7 @@ export class Encounter {
   get active(){return !this.won&&(this.hp>0||this.options.invincible);}
   targetRect(target){const west=!this.east;let y=target==='head'?42:target==='mage'?(west?37:47):(west?47:37);return{x:west?23:38,y,w:5,h:5};}
   targetPoint(target){const r=this.targetRect(target);return{x:r.x+r.w/2,y:r.y+r.h/2};}
-  canAttack(target){return this.phase===4?target==='head':target!=='head'&&this.handHP[target]>0&&!this.transition;}
+  canAttack(target){return this.active&&(this.phase===4?target==='head'&&this.handHP.head>0:target!=='head'&&this.handHP[target]>0&&!this.transition&&!(target==='melee'&&this.tick<this.clenchUntil));}
   move(tile,walk=false){this.target=null;this.path=findPath(this.position,tile,this.walkable);this.walkOverride=walk;this.destination=this.path.at(-1)||{...this.position};}
   attack(target){if(!this.canAttack(target)){this.log('Game','That part of Olm cannot be attacked right now.');return;}this.target=target;this.path=[];this.destination=null;this.walkOverride=false;}
   equip(index){const id=this.inventory[index],item=this.items[id];if(!item?.slot||!item.wearModels?.length)return false;
@@ -150,7 +150,7 @@ export class Encounter {
     const special=this.phase<4&&slot===3?kinds[this.specialIndex++%kinds.length]:null;
     this.scanReason='player position';const desired=this.headSide();this.trace.push({type:'olm',tick:this.tick,slot,special,from:this.headFacing,to:desired,turned:desired!==this.headFacing,position:{...this.position},reason:this.scanReason});
     if(desired!==this.headFacing){const fromFacing=this.headFacing;this.headFacing=desired;this.turns++;this.catchUp=basic;this.lastBossAction=`Turn (${basic?'basic skipped':special||'empty'})`;this.effects.push({type:'turn',fromFacing,side:desired,facing:desired,tick:this.tick});this.log('Olm',this.lastBossAction);return;}
-    if(this.phase<3&&slot===1&&this.handHP.mage>0&&this.handHP.melee>0&&this.tick>=this.nextClench&&this.clenchDamage>=this.options.handHealth*.05){this.clenchUntil=this.tick+8;this.nextClench=this.tick+50;this.clenchDamage=0;this.log('Olm','The left claw clenches for eight ticks.');}
+    if(this.phase<3&&slot===1&&this.handHP.mage>0&&this.handHP.melee>0&&this.tick>=this.nextClench&&this.clenchDamage>=this.options.handHealth*.05){this.clenchUntil=this.tick+8;this.nextClench=this.tick+50;this.clenchDamage=0;if(this.target==='melee'){this.target=null;this.path=[];this.destination=null;}this.log('Olm','The left claw clenches for eight ticks.');}
     this.lastBossAction=this.phase===4?'Head attack':basic?`Basic ${slot===0?1:2}`:special||'Empty';
     if(special&&this.handHP.melee>0&&this.phase<4&&this.tick>=this.clenchUntil&&this.options.method!=='demo')this.special(special);
     if(!basic&&!owed&&this.phase<4&&this.options.method!=='demo'){if(!special)this.log('Olm','Empty attack.');return;}
@@ -174,7 +174,7 @@ export class Encounter {
     const type=forced||({acid:['acid-splat','acid-trail'],flame:['burn','flame'],crystal:['bomb','shards']}[power][Math.floor(this.random()*2)]);
     if(type==='acid-splat')for(let i=0;i<8;i++){const p=i?this.randomTile():this.position;this.addHazard('acid',p.x,p.y,2,20);}
     if(type==='acid-trail')this.trailUntil=this.tick+12;
-    if(type==='burn')for(let i=0;i<6;i++)this.burns.push(this.tick+i*8);
+    if(type==='burn'){this.incoming.push({due:this.tick+2,burn:true});this.effects.push({type:'olm-projectile',special:'burn',style:'mage',facing:this.headFacing,aim:{...this.position},tick:this.tick});}
     if(type==='bomb')this.addHazard('bomb',this.position.x,this.position.y,5,1);
     if(type==='shards')this.shardsUntil=this.tick+12;
     if(type==='flame'){
@@ -194,7 +194,7 @@ export class Encounter {
   }
   addHazard(type,x,y,delay,duration){this.hazards.push({type,x,y,created:this.tick,due:this.tick+delay,until:this.tick+delay+duration});}
   hazardsTick(){
-    for(const hit of this.incoming.filter(h=>h.due<=this.tick))this.hitPlayer(hit.sphere?(this.protection===hit.sphere?0:Math.floor(this.hp/2)):hit.damage,'none');
+    for(const hit of this.incoming.filter(h=>h.due<=this.tick)){if(hit.burn){for(let i=0;i<6;i++)this.burns.push(this.tick+i*8);}else this.hitPlayer(hit.sphere?(this.protection===hit.sphere?0:Math.floor(this.hp/2)):hit.damage,'none');}
     this.incoming=this.incoming.filter(h=>h.due>this.tick);
     for(const due of this.burns.filter(t=>t<=this.tick)){this.hitPlayer(5,'none');for(const stat of Object.keys(this.stats))this.stats[stat]=Math.max(1,this.stats[stat]-2);this.log('Game','Burn with me!');}this.burns=this.burns.filter(t=>t>this.tick);
     if(this.tick<this.trailUntil)for(const p of this.motionPath.slice(0,-1).length?this.motionPath.slice(0,-1):[this.position])this.addHazard('acid',p.x,p.y,1,20);
@@ -202,7 +202,7 @@ export class Encounter {
     const pools=this.hazards.filter(h=>h.type==='pool'&&this.tick===h.due);
     if(pools.length&&!pools.some(h=>distance(this.position,h)===0)){const damage=10+Math.floor(this.random()*11);this.hitPlayer(damage,'none');this.handHP.head=Math.min(800,this.handHP.head+damage*5);this.log('Olm','Missed healing pools: Olm absorbs health.');}
     for(const h of this.hazards){if(this.tick<h.due||this.tick>=h.until||h.type==='pool')continue;
-      if(this.tick===h.due&&['crystal','bomb'].includes(h.type))this.effects.push({type:'hazard-impact',x:h.x,y:h.y,tick:this.tick});
+      if(this.tick===h.due&&['crystal','bomb'].includes(h.type))this.effects.push({type:'hazard-impact',hazard:h.type,x:h.x,y:h.y,tick:this.tick});
       if(h.type==='lightning')h.y=h.startY+(this.tick-h.due)*h.direction;
       const d=distance(this.position,h);
       if(h.type==='acid'&&d===0)this.hitPlayer(4,'none');
@@ -235,7 +235,7 @@ export class Encounter {
       if(this.phase===3){this.phase=4;this.headFacing='middle';this.nextBoss=this.tick+4;this.nextPools=this.tick+24;this.bossCycle=0;this.catchUp=false;this.lastHandHit={};this.log('Game','Both claws fall. The head phase begins—equip ranged.');}
       else{this.transition=this.tick+32;this.log('Game','Both claws fall. Keep moving through the transition.');}return;}
     if(this.phase===4&&this.handHP.head===0){this.won=true;this.log('Game','You have completed the solo encounter.');return;}
-    if(this.phase===4&&this.options.mechanics==='full'){if(this.tick%5===0)this.addHazard('crystal',this.position.x,this.position.y,4,1);if(this.tick>=this.nextPools){this.nextPools=this.tick+32;for(let i=0;i<2;i++){const p=this.randomTile();this.addHazard('pool',p.x,p.y,10,3);}this.log('Olm','Stand on a blue healing pool when its countdown ends.');}}
+    if(this.phase===4&&this.options.mechanics==='full'){if(this.tick%5===0)this.addHazard('crystal',this.position.x,this.position.y,4,1);if(this.tick>=this.nextPools){this.nextPools=this.tick+32;for(let i=0;i<2;i++){const p=this.randomTile();this.addHazard('pool',p.x,p.y,10,3);this.effects.push({type:'olm-projectile',special:'pool',aim:p,groundTarget:true,facing:this.headFacing,tick:this.tick});}this.log('Olm','Stand on a blue healing pool when its countdown ends.');}}
     if(this.trace.length>256)this.trace.splice(0,this.trace.length-256);
     if(this.hp===0)this.log('Game','You have died. Reset or select another phase to practise.');
   }
