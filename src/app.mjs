@@ -5,6 +5,7 @@ import {View,loadAssets,asset} from './render.mjs';
 import {mapPoint,mapTile} from './tiles.mjs';
 import {DRILLS,prepareDrill,driveDrill,assessDrill} from './practice.mjs';
 import {TickClock} from './clock.mjs';
+import {timingPlan,zonePlan} from './guidance.mjs';
 import {SPECIAL_PRACTICE,triggerSpecial,specialCue} from './special-practice.mjs';
 (async()=>{
 const $=id=>document.getElementById(id),clock=new TickClock();let game,view,icons,manifest,playing=false,lastTime=performance.now(),tab='inventory',uiVersion='',speed=1,coaching=false,rehearsal=null,endingTime=0,specialPractice=null,selectedSpell=false;
@@ -43,7 +44,7 @@ $('invincible').onchange=()=>game.options.invincible=$('invincible').checked;
 $('follow-player').onchange=()=>{view.followPlayer=$('follow-player').checked;view.focusInitialized=false;};
 $('coaching').onchange=()=>{coaching=$('coaching').checked;document.body.classList.toggle('client-view',!coaching);$('layout').textContent=coaching?'Game view':'Show coaching';};
 $('layout').onclick=()=>{$('coaching').checked=!coaching;$('coaching').onchange();};
-for(const name of ['trueTile','destination','grid','markers','path'])$('tiles-'+name).onchange=()=>view.tileOptions[name]=$('tiles-'+name).checked;
+for(const name of ['trueTile','destination','grid','markers','path','headZones','hazardZones'])$('tiles-'+name).onchange=()=>view.tileOptions[name]=$('tiles-'+name).checked;
 $('step').onclick=()=>{playing=false;clock.remainder=0;clock.advance(TICK_MS,1,time=>tickGame(time));updateUI();};
 document.addEventListener('visibilitychange',()=>{lastTime=performance.now();if(document.hidden&&playing){playing=false;updateUI();}});
 $('run').onclick=()=>{game.run=!game.run;updateUI();};$('camera-reset').onclick=()=>view.resetCamera();
@@ -97,7 +98,18 @@ function input(){const el=$('viewport'),pointers=new Map();let drag=null,lastPin
   document.addEventListener('keydown',e=>{if(e.target.matches('input,select')||document.querySelector('dialog[open]'))return;const keys={F4:'inventory',F5:'equipment',F6:'prayers',F7:'magic'};if(keys[e.key]){e.preventDefault();setTab(keys[e.key]);}if(e.key.startsWith('Arrow')){e.preventDefault();view.rotate(e.key==='ArrowLeft'?-15:e.key==='ArrowRight'?15:0,e.key==='ArrowUp'?-12:e.key==='ArrowDown'?12:0);}if(e.key==='Escape'){$('context').hidden=true;selectedSpell=false;$('water').classList.remove('active');}});
 }
 let frames=0,fps=0,fpsTime=performance.now();
-function frame(time){const delta=time-lastTime;lastTime=time;if(playing&&game.active&&!document.hidden)clock.advance(delta,speed,tickTime=>{tickGame(tickTime);updateUI();});if(playing&&game.won)endingTime+=delta*speed;view.draw(game,clock.animationTime+endingTime,clock.progress);const head=view.headMotion.sample(clock.animationTime),direction=head.facing==='middle'?'centre':head.facing==='mage'?'mage side':'melee side';$('head-status').textContent=`${head.action==='turn'?'Turning toward':head.action==='attack'?'Attacking':'Facing'} ${direction}`;$('tile-position').textContent=`True tile ${game.position.x+3200}, ${game.position.y+5696}`;$('tick-fill').style.width=`${clock.progress*100}%`;$('cycle-status').textContent=specialPractice?'Isolated special practice':`Olm: ${game.lastBossAction} · next in ${Math.max(0,game.nextBoss-game.tick)}t`;frames++;if(time-fpsTime>=1000){fps=Math.round(frames*1000/(time-fpsTime));frames=0;fpsTime=time;$('render-status').textContent=`${fps} fps · ${speed}×`; }requestAnimationFrame(frame);}
+let guidanceVersion='';
+function drawGuidance(){
+ const timers=$('special-timers').checked,zones=view.tileOptions.headZones||view.tileOptions.hazardZones,panel=$('special-timing');
+ panel.hidden=!game.active||(!timers&&!zones);document.body.classList.toggle('guidance-visible',!panel.hidden);if(panel.hidden)return;
+ const plan=timingPlan(game,clock.progress,{isolated:!!specialPractice}),zone=zonePlan(game,{isolated:!!specialPractice||!view.tileOptions.headZones});
+ const version=JSON.stringify([timers,zones,plan.rows.map(r=>[r.name,r.kind,r.ticks,r.seconds.toFixed(1),r.suppressed]),plan.note,zone.hint]);if(version===guidanceVersion)return;guidanceVersion=version;
+ $('timing-rows').hidden=!timers;$('timing-note').hidden=!timers;$('zone-hint').hidden=$('zone-key').hidden=!zones;
+ panel.dataset.hazards=String(plan.rows.some(row=>row.kind==='hazard'));
+ if(timers){$('timing-rows').replaceChildren(...plan.rows.map(row=>{const div=document.createElement('div');div.className='guidance-timer';div.dataset.kind=row.kind;div.dataset.urgent=String(row.ticks<=2&&!row.suppressed);const label=document.createElement('span');label.textContent=row.name;const value=document.createElement('b');value.textContent=row.suppressed||`${row.ticks}t · ${row.seconds.toFixed(1)}s`;div.append(label,value);return div;}));$('timing-note').textContent=plan.note;}
+ if(zones)$('zone-hint').textContent=zone.hint;
+}
+function frame(time){const delta=time-lastTime;lastTime=time;if(playing&&game.active&&!document.hidden)clock.advance(delta,speed,tickTime=>{tickGame(tickTime);updateUI();});if(playing&&game.won)endingTime+=delta*speed;view.isolatedPractice=!!specialPractice;view.draw(game,clock.animationTime+endingTime,clock.progress);drawGuidance();const head=view.headMotion.sample(clock.animationTime),direction=head.facing==='middle'?'centre':head.facing==='mage'?'mage side':'melee side';$('head-status').textContent=`${head.action==='turn'?'Turning toward':head.action==='attack'?'Attacking':'Facing'} ${direction}`;$('tile-position').textContent=`True tile ${game.position.x+3200}, ${game.position.y+5696}`;$('tick-fill').style.width=`${clock.progress*100}%`;$('cycle-status').textContent=specialPractice?'Isolated special practice':`Olm: ${game.lastBossAction} · next in ${Math.max(0,game.nextBoss-game.tick)}t`;frames++;if(time-fpsTime>=1000){fps=Math.round(frames*1000/(time-fpsTime));frames=0;fpsTime=time;$('render-status').textContent=`${fps} fps · ${speed}×`; }requestAnimationFrame(frame);}
 try{const data=await loadAssets((count,total)=>$('load-progress').textContent=`Decoding models ${count} / ${total}`);manifest=data.manifest;game=new Encounter(data.scene,manifest.items);view=new View($('viewport'),$('overlay'),manifest,data.scene,data.models,data.textures,data.playerRig,data.crossSprites);icons=view.icons();
   await Promise.all([...document.querySelectorAll('[data-sprite]')].map(async img=>img.src=await asset(manifest.sprites[img.dataset.sprite].file)));$('panel').style.backgroundImage=`url("${await asset(manifest.sprites[1031].file)}")`;await makePrayers();$('load').remove();input();updateUI();lastTime=performance.now();requestAnimationFrame(frame);
 }catch(e){$('load-progress').textContent=`Unable to start: ${e.message}`;console.error(e);}

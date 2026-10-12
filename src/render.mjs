@@ -4,6 +4,7 @@ import {HeadMotion,clipSample,clipDuration,movementSample,PoseTransition,playerF
 import {roomWalkable,PRACTICE_TILES,closestWalkableTile} from './tiles.mjs';
 import {convexHull,silhouetteHit} from './picking.mjs';
 import {projectilePose} from './effect-timing.mjs';
+import {zonePlan} from './guidance.mjs';
 import {assembleRig,poseRig,PlayerMotion} from './player-rig.mjs';
 import {readAssetJson} from './assets.mjs';
 import {EncounterEffects} from './effects.mjs';
@@ -67,7 +68,12 @@ export class View {
     this.encounterEffects=new EncounterEffects(this.scene,(name,time)=>this.effectModel(name,time),mesh=>this.disposeEffect(mesh));
     this.shadow=new THREE.Mesh(new THREE.CircleGeometry(.32,16),new THREE.MeshBasicMaterial({color:0x000000,opacity:.5,transparent:true,depthWrite:false}));this.shadow.rotation.x=-Math.PI/2;this.scene.add(this.shadow);
 
-    this.tileOptions={trueTile:true,destination:true,grid:true,markers:true,path:false};
+    this.tileOptions={trueTile:true,destination:true,grid:true,markers:true,path:false,headZones:true,hazardZones:true};
+    this.zoneLayers={};const count=roomWalkable(scene).size;
+    for(const [name,tint,opacity,order]of [['visible',0xdb756c,.13,3],['turn',0x32cddd,.18,4],['warning',0xffb32c,.28,5],['goals',0x40ed75,.28,6],['danger',0xff3020,.30,7]]){
+      const geometry=new THREE.PlaneGeometry(.96,.96);geometry.rotateX(-Math.PI/2);
+      const mesh=new THREE.InstancedMesh(geometry,new THREE.MeshBasicMaterial({color:tint,transparent:true,opacity,depthWrite:false,depthTest:false}),count);mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.renderOrder=order;mesh.count=0;mesh.frustumCulled=false;this.scene.add(mesh);this.zoneLayers[name]=mesh;
+    }
     this.trueTile=tileOutline(0x30e9ef,.045);this.destinationTile=tileOutline(0xffffff);this.hoverTile=tileOutline(0xffdf55,.02);this.hoverTile.visible=false;this.scene.add(this.trueTile,this.destinationTile,this.hoverTile);
     this.practiceTiles=new THREE.Group();for(const p of PRACTICE_TILES){const mesh=tileOutline(0xf4b65b,.023);mesh.position.copy(point(p.x+.5,p.y+.5,.016));mesh.material.opacity=.7;this.practiceTiles.add(mesh);}this.scene.add(this.practiceTiles);
     const vertices=[],cells=roomWalkable(scene);for(const k of cells){const [x,y]=k.split(',').map(Number);for(const [a,b]of [[[x,y],[x+1,y]],[[x,y],[x,y+1]]])vertices.push(...point(...a,.005),...point(...b,.005));if(!cells.has(`${x+1},${y}`))vertices.push(...point(x+1,y,.005),...point(x+1,y+1,.005));if(!cells.has(`${x},${y+1}`))vertices.push(...point(x,y+1,.005),...point(x+1,y+1,.005));}
@@ -93,7 +99,7 @@ export class View {
   cameraUpdate(){const zoom=this.zoom*Math.max(1,(this.followPlayer?1.1:1.45)/this.camera.aspect),radius=zoom*Math.cos(this.elevation);this.camera.position.set(this.focus.x+Math.sin(this.azimuth)*radius,this.focus.y+Math.sin(this.elevation)*zoom,this.focus.z+Math.cos(this.azimuth)*radius);this.camera.lookAt(this.focus);}
   resetCamera(){this.azimuth=.8;this.elevation=.88;this.zoom=20;}
   reset(){this.focusInitialized=false;this.playerMotion.reset();this.wasWon=false;this.handDeaths={};this.previousHP={};this.lastTransition=0;this.headHiddenAt=0;this.lastTick=-1;this.lastPhase=0;this.gearKey='';this.hits=[];this.pendingShots=[];this.playerTime=undefined;this.handBusy=null;this.hoverTile.visible=false;
-    this.encounterEffects.clear();this.lastPlayerPose=null;this.poseTransition.reset();this.clickFeedback=null;this.pickShapes=[];this.pickTime=-Infinity;
+    this.encounterEffects.clear();this.lastPlayerPose=null;this.poseTransition.reset();this.clickFeedback=null;this.pickShapes=[];this.pickTime=-Infinity;this.zoneKey='';
     for(const p of this.projectiles){this.scene.remove(p.mesh);this.disposeEffect(p.mesh);}this.projectiles=[];
   }
   rotate(dx,dy){this.azimuth-=dx*.007;this.elevation=THREE.MathUtils.clamp(this.elevation+dy*.004,.35,1.35);}
@@ -156,6 +162,14 @@ export class View {
   disposeEffect(mesh){mesh.traverse(o=>{o.geometry?.dispose();o.material?.dispose();});}
   projectile(from,to,color,time,effect,duration=1200,followPlayer=false,arc=0){const model=this.effectModel(effect,time),mesh=new THREE.Group();model.updateMatrixWorld(true);const center=new THREE.Box3().setFromObject(model).getCenter(new THREE.Vector3());model.position.sub(center);mesh.add(model);this.scene.add(mesh);this.projectiles.push({mesh,model,from,to,time,duration,followPlayer,arc});}
   project(p){const v=p.clone().project(this.camera);return{x:(v.x*.5+.5)*this.container.clientWidth,y:(-.5*v.y+.5)*this.container.clientHeight};}
+  drawZones(game){
+    const key=[game.tick,game.phase,game.headFacing,game.options.method,game.transition,game.active,this.isolatedPractice,this.tileOptions.headZones,this.tileOptions.hazardZones,game.hazards.map(h=>(h.gaps||[]).length)].join(':');if(key===this.zoneKey)return;this.zoneKey=key;
+    const plan=zonePlan(game,{isolated:!!this.isolatedPractice}),matrix=new THREE.Matrix4();
+    for(const [name,mesh]of Object.entries(this.zoneLayers)){
+      const enabled=['visible','turn'].includes(name)?this.tileOptions.headZones:this.tileOptions.hazardZones,cells=enabled?plan[name]:[];mesh.count=cells.length;
+      cells.forEach((p,i)=>{const v=point(p.x+.5,p.y+.5,.04);matrix.makeTranslation(v.x,v.y,v.z);mesh.setMatrixAt(i,matrix);});mesh.instanceMatrix.needsUpdate=true;
+    }
+  }
   draw(game,time,progress){
     this.time=time;this.gear(game,time);if(game.tick!==this.lastTick)this.tick(game,time);
     const points=game.motionPath||[game.position],steps=points.length-1,pace=game.motionPace||1,movementProgress=steps?Math.min(1,progress*pace/steps):1;
@@ -168,6 +182,7 @@ export class View {
     this.trueTile.visible=this.tileOptions.trueTile;this.trueTile.position.copy(point(game.position.x+.5,game.position.y+.5,.02));
     this.destinationTile.visible=this.tileOptions.destination&&!!game.destination&&(game.path.length>0||moving);if(game.destination)this.destinationTile.position.copy(point(game.destination.x+.5,game.destination.y+.5,.018));
     this.grid.visible=this.tileOptions.grid;this.practiceTiles.visible=this.tileOptions.markers;this.route.visible=this.tileOptions.path;
+    this.drawZones(game);
     for(const obj of this.targets){const target=obj.userData.target;const death=this.handDeaths[target];obj.visible=target==='head'?(!this.headHiddenAt||time<this.headHiddenAt):!!(game.phase<4&&(game.handHP[target]>0&&!game.transition||death&&time<death.until));if(death){obj.setAnimation(death.id,time,{started:death.started,loop:false});obj.animate(time);continue;}
       if(target==='head'){const pose=this.headMotion.sample(time);obj.setAnimation(pose.id,time,pose);}
       if(target==='melee'){const busy=this.handBusy&&time<this.handBusy.until;const id=game.tick<game.clenchUntil?7361:busy?this.handBusy.id:game.tick<game.healUntil?7357:7355;obj.setAnimation(id,time,{started:busy?this.handBusy.started:obj.anim===id?obj.started:time,loop:!busy});}obj.animate(time);}
