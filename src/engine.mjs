@@ -42,7 +42,7 @@ export class Encounter {
     if(this.options.method==='demo')this.position={x:29,y:44};this.previous={...this.position};this.motionPath=[{...this.position}];this.demoIndex=0;this.demoHold=0;
     this.pendingHits=[];this.incoming=[];this.trace=[];this.lastHandAttempt={};this.boundUntil=0;this.prayerLockedUntil=0;this.trailUntil=0;this.shardsUntil=0;this.burns=[];this.powerReady=0;this.nextPools=24;this.forceSplash=false;this.clenchDamage=0;this.nextClench=0;this.feedback='';this.attackAt=-100;this.drinkAt=-100;this.headFacing='middle';this.bossCycle=0;this.nextBoss=4;this.catchUp=false;this.lastHandHit={};this.bossStyle='mage';this.lastBossAction='Waiting';
     this.handHP={mage:this.options.handHealth,melee:this.options.handHealth,head:800};this.deadAt={};this.transition=0;this.won=false;
-    this.healUntil=0;this.clenchUntil=0;this.hazards=[];this.effects=[];this.events=[];this.attackCount=0;this.olmAttacks=0;this.turns=0;this.switches=0;this.specialIndex=0;
+    this.healUntil=0;this.clenchUntil=0;this.hazards=[];this.effects=[];this.events=[];this.attackCount=0;this.olmAttacks=0;this.turns=0;this.switches=0;this.specialIndex=0;this.lastSpecial=null;
     this.equipment={head:10828,cape:6570,hands:7462,feet:11840,weapon:22978,body:11832,legs:11834,neck:19553};
     if(this.options.method==='3:0')Object.assign(this.equipment,{weapon:12899,body:4712,legs:4714,neck:12002});
     if(this.options.method==='head')Object.assign(this.equipment,{weapon:21012,body:4736,legs:4738,neck:19547});
@@ -82,7 +82,8 @@ export class Encounter {
   hitPlayer(amount,style){if(this.protection===style)amount=Math.floor(amount*.4);if(!this.options.invincible&&this.options.method!=='demo')this.hp=Math.max(0,this.hp-amount);this.effects.push({type:'player-hit',damage:amount,tick:this.tick});}
   applyMovement(){this.previous={...this.position};const steps=this.run&&!this.walkOverride?2:1;this.motionPace=steps;
     this.motionPath=[{...this.position}];
-    for(let n=0;n<steps&&this.path.length&&this.tick>=this.boundUntil;n++){const next=this.path[0];if(this.hazards.some(h=>h.type==='flame'&&this.tick>=h.due&&this.tick<h.until&&Math.abs(next.y-h.y)===1&&!(h.gaps||[]).includes(key(next))))break;this.path.shift();this.facing=Math.atan2(next.x-this.position.x,-(next.y-this.position.y));this.position=next;this.motionPath.push({...next});}
+    if(this.path.length&&this.tick<this.boundUntil)this.trace.push({type:'move-blocked',tick:this.tick,reason:'a stun',position:{...this.position}});
+    for(let n=0;n<steps&&this.path.length&&this.tick>=this.boundUntil;n++){const next=this.path[0];if(this.hazards.some(h=>h.type==='flame'&&this.tick>=h.due&&this.tick<h.until&&Math.abs(next.y-h.y)===1&&!(h.gaps||[]).includes(key(next)))){this.trace.push({type:'move-blocked',tick:this.tick,reason:'a flame wall',position:{...this.position}});break;}this.path.shift();this.facing=Math.atan2(next.x-this.position.x,-(next.y-this.position.y));this.position=next;this.motionPath.push({...next});}
     this.animation=distance(this.previous,this.position)?steps===2?824:819:this.tick-this.attackAt<2?this.animation:808;
   }
   inRange(p=this.position){if(!this.target||!this.weapon)return false;const r=this.targetRect(this.target);return this.weapon.style==='melee'?meleeReach(p,r):rectangleDistance(p,r)<=7;}
@@ -148,7 +149,14 @@ export class Encounter {
     const slot=this.bossCycle++%4,basic=this.phase===4||slot===0||slot===2,owed=this.catchUp;this.catchUp=false;
     const kinds=this.phase===3?['crystal','lightning','portal','heal']:['crystal','lightning','portal'];
     const special=this.phase<4&&slot===3?kinds[this.specialIndex++%kinds.length]:null;
-    this.scanReason='player position';const desired=this.headSide();this.trace.push({type:'olm',tick:this.tick,slot,special,from:this.headFacing,to:desired,turned:desired!==this.headFacing,position:{...this.position},reason:this.scanReason});
+    this.scanReason='player position';const desired=this.headSide(),scan={type:'olm',tick:this.tick,slot,special,from:this.headFacing,to:desired,turned:desired!==this.headFacing,position:{...this.position},reason:this.scanReason};this.trace.push(scan);
+    if(special&&this.options.method!=='demo'){
+      const status=scan.turned?'skipped':this.handHP.melee<=0?'disabled':this.tick<this.clenchUntil?'clenched':'fired';
+      const lastTurn=this.trace.findLast(e=>e.type==='olm'&&e.turned)?.tick??0;
+      const blocked=this.trace.findLast(e=>e.type==='move-blocked'&&e.tick>=Math.max(this.tick-16,lastTurn)&&e.tick<this.tick);
+      this.lastSpecial={...scan,status,blocked:status==='fired'?blocked?.reason:null};
+      scan.outcome=status;
+    }
     if(desired!==this.headFacing){const fromFacing=this.headFacing;this.headFacing=desired;this.turns++;this.catchUp=basic;this.lastBossAction=`Turn (${basic?'basic skipped':special||'empty'})`;this.effects.push({type:'turn',fromFacing,side:desired,facing:desired,tick:this.tick});this.log('Olm',this.lastBossAction);return;}
     if(this.phase<3&&slot===1&&this.handHP.mage>0&&this.handHP.melee>0&&this.tick>=this.nextClench&&this.clenchDamage>=this.options.handHealth*.05){this.clenchUntil=this.tick+8;this.nextClench=this.tick+50;this.clenchDamage=0;if(this.target==='melee'){this.target=null;this.path=[];this.destination=null;}this.log('Olm','The left claw clenches for eight ticks.');}
     this.lastBossAction=this.phase===4?'Head attack':basic?`Basic ${slot===0?1:2}`:special||'Empty';
@@ -227,12 +235,12 @@ export class Encounter {
     if(!this.prayerPoints){this.protection=null;this.offensive=null;}
     this.hazardsTick();
     if(!this.active){this.log('Game','You have died. Reset to practise.');return;}
-    if(this.transition){if(this.tick>=this.transition){this.phase++;this.nextPools=this.tick+24;this.handHP.mage=this.options.handHealth;this.handHP.melee=this.options.handHealth;this.deadAt={};this.transition=0;this.headFacing='middle';this.nextBoss=this.tick+4;this.bossCycle=0;this.specialIndex=0;this.catchUp=false;this.lastHandHit={};this.clenchDamage=0;this.clenchUntil=0;this.healUntil=0;this.nextClench=this.tick;this.lastBossAction='Waiting';this.log('Game',this.phase===4?'Olm prepares its final stand. Equip ranged.':`Phase ${this.phase} begins.`);}else if(this.tick%4===0)this.addHazard('crystal',this.position.x,this.position.y,4,1);return;}
+    if(this.transition){if(this.tick>=this.transition){this.phase++;this.nextPools=this.tick+24;this.handHP.mage=this.options.handHealth;this.handHP.melee=this.options.handHealth;this.deadAt={};this.transition=0;this.headFacing='middle';this.nextBoss=this.tick+4;this.bossCycle=0;this.specialIndex=0;this.lastSpecial=null;this.catchUp=false;this.lastHandHit={};this.clenchDamage=0;this.clenchUntil=0;this.healUntil=0;this.nextClench=this.tick;this.lastBossAction='Waiting';this.log('Game',this.phase===4?'Olm prepares its final stand. Equip ranged.':`Phase ${this.phase} begins.`);}else if(this.tick%4===0)this.addHazard('crystal',this.position.x,this.position.y,4,1);return;}
     this.playerAttack();
     if(this.phase===3&&!(this.handHP.mage===0&&this.handHP.melee===0))for(const hand of ['mage','melee']){
       if(this.handHP[hand]===0&&this.tick-this.deadAt[hand]>=50){this.handHP[hand]=this.options.handHealth;delete this.deadAt[hand];this.log('Game',`${hand} hand revives. Finish both within thirty seconds.`);}}
     if(this.phase<4&&this.handHP.mage===0&&this.handHP.melee===0){this.target=null;this.pendingHits=[];
-      if(this.phase===3){this.phase=4;this.headFacing='middle';this.nextBoss=this.tick+4;this.nextPools=this.tick+24;this.bossCycle=0;this.catchUp=false;this.lastHandHit={};this.log('Game','Both claws fall. The head phase begins—equip ranged.');}
+      if(this.phase===3){this.phase=4;this.headFacing='middle';this.nextBoss=this.tick+4;this.nextPools=this.tick+24;this.bossCycle=0;this.lastSpecial=null;this.catchUp=false;this.lastHandHit={};this.log('Game','Both claws fall. The head phase begins—equip ranged.');}
       else{this.transition=this.tick+32;this.log('Game','Both claws fall. Keep moving through the transition.');}return;}
     if(this.phase===4&&this.handHP.head===0){this.won=true;this.log('Game','You have completed the solo encounter.');return;}
     if(this.phase===4&&this.options.mechanics==='full'){if(this.tick%5===0)this.addHazard('crystal',this.position.x,this.position.y,4,1);if(this.tick>=this.nextPools){this.nextPools=this.tick+32;for(let i=0;i<2;i++){const p=this.randomTile();this.addHazard('pool',p.x,p.y,10,3);this.effects.push({type:'olm-projectile',special:'pool',aim:p,groundTarget:true,facing:this.headFacing,tick:this.tick});}this.log('Olm','Stand on a blue healing pool when its countdown ends.');}}

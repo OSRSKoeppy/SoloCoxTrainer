@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {Encounter} from '../src/engine.mjs';
-import {timingPlan,zonePlan,countdown} from '../src/guidance.mjs';
+import {timingPlan,zonePlan,countdown,specialReport} from '../src/guidance.mjs';
+import {prepareDrill,driveDrill,drillTile} from '../src/practice.mjs';
 const scene=JSON.parse(fs.readFileSync(new URL('../public/assets/scene.json',import.meta.url))),items=JSON.parse(fs.readFileSync(new URL('../public/assets/manifest.json',import.meta.url))).items;
 const make=options=>new Encounter(scene,items,{invincible:true,mechanics:'basic',...options});
 const has=(cells,x,y)=>cells.some(p=>p.x===x&&p.y===y);
@@ -53,4 +54,32 @@ test('hazard footprints override recommended sectors and show portal goals and t
 test('transition crystal hazards stay highlighted and extinguished flame tiles are removed',()=>{
  const g=make();g.transition=32;g.addHazard('crystal',32,44,4,1);let plan=zonePlan(g);assert.equal(plan.visible.length,0);assert.ok(has(plan.danger,33,45));
  g.transition=0;g.hazards=[];g.addHazard('flame',32,44,1,8);g.hazards[0].gaps=['32,43'];plan=zonePlan(g);assert.ok(!has(plan.danger,32,43));assert.ok(has(plan.danger,33,43));
+});
+
+test('4:1 guidance follows turn, turn, tank, hold on both walls without sending the player away on Empty',()=>{
+ for(const phase of [1,2]){
+  const g=make({method:'4:1',phase,accuracy:'always',handHealth:10000});prepareDrill(g);
+  assert.deepEqual(zonePlan(g).tile,drillTile(g,43));assert.match(zonePlan(g).hint,/Basic 2/);
+  driveDrill(g);g.next();assert.deepEqual(zonePlan(g).tile,drillTile(g,50));assert.match(zonePlan(g).hint,/Special next/);
+  for(let t=1;t<5;t++){driveDrill(g);g.next();}
+  assert.equal(zonePlan(g).turn.length,0);assert.match(zonePlan(g).hint,/tanked attack/);
+  for(let t=5;t<9;t++){driveDrill(g);g.next();}
+  assert.equal(zonePlan(g).turn.length,0);assert.equal(zonePlan(g).tile,null);assert.match(zonePlan(g).hint,/fourth hit, then run centre/);
+ }
+});
+
+test('special report captures the tile used for the scan, not the position after movement',()=>{
+ const g=make({method:'4:1',accuracy:'always',handHealth:10000});prepareDrill(g);
+ for(let t=1;t<=5;t++){if(t===4)g.move(drillTile(g,50));else if(t!==3)driveDrill(g);g.next();}
+ assert.equal(g.position.y,50);assert.equal(g.lastSpecial.position.y,49);assert.equal(g.lastSpecial.status,'fired');
+ const report=specialReport(g);assert.match(report.title,/Crystal burst fired/);assert.match(report.detail,/3228, 5745/);
+ g.position.y=43;assert.equal(g.lastSpecial.position.y,49,'moving later must not change the explanation');
+ g.reset();assert.equal(specialReport(g),null);
+});
+
+test('report distinguishes skipped, clenched and disabled specials and does not mutate the encounter',()=>{
+ const g=make();g.tick=4;g.bossCycle=3;g.position={x:28,y:50};g.bossAction();assert.equal(specialReport(g).status,'skipped');
+ g.bossCycle=3;g.clenchUntil=12;g.tick=8;g.bossAction();assert.equal(specialReport(g).status,'clenched');
+ g.clenchUntil=0;g.handHP.melee=0;g.bossCycle=3;g.bossAction();assert.equal(specialReport(g).status,'disabled');
+ const before=JSON.stringify(g);specialReport(g);assert.equal(JSON.stringify(g),before);
 });
